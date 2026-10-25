@@ -31,7 +31,7 @@ $statusColumn = $hasUserColumn('status') ? 'status' : "''";
 $search = trim((string)($_GET['search'] ?? ''));
 $roleFilter = trim((string)($_GET['role'] ?? ''));
 $statusFilter = trim((string)($_GET['status'] ?? ''));
-$barangayFilter = trim((string)($_GET['barangay'] ?? ''));
+$barangayFilter = '';
 $sort = trim((string)($_GET['sort'] ?? 'newest'));
 $includeAll = (string)($_GET['include_all'] ?? '0') === '1';
 $download = (string)($_GET['download'] ?? '') === 'pdf';
@@ -56,12 +56,8 @@ if (!$includeAll) {
         $sf = $conn->real_escape_string($statusFilter);
         $conditions[] = "LOWER({$statusColumn}) = LOWER('$sf')";
     }
-
-    if ($barangayFilter !== '' && $hasUserColumn('barangay')) {
-        $bf = $conn->real_escape_string($barangayFilter);
-        $conditions[] = "LOWER({$barangayColumn}) = LOWER('$bf')";
-    }
 }
+
 
 $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
 
@@ -251,15 +247,6 @@ include('../includes/sidebar_admin.php');
                         <option value="">All Statuses</option>
                         <?php foreach ($statusOptions as $opt): ?>
                         <option value="<?= htmlspecialchars($opt) ?>" <?= strtolower($statusFilter) === strtolower($opt) ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="ur-field">
-                    <label>Barangay</label>
-                    <select name="barangay">
-                        <option value="">All Barangays</option>
-                        <?php foreach ($barangayOptions as $opt): ?>
-                        <option value="<?= htmlspecialchars($opt) ?>" <?= strtolower($barangayFilter) === strtolower($opt) ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>

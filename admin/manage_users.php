@@ -3,10 +3,18 @@ session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') { header('Location: ../login.php'); exit(); }
 require_once '../config/database.php';
 require_once '../config/barangays.php';
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
 
 $userColumns = [];
 $userColResult = $conn->query("SHOW COLUMNS FROM users");
 if ($userColResult) { while ($col = $userColResult->fetch_assoc()) $userColumns[] = $col['Field']; }
+if (!in_array('status', $userColumns, true)) {
+    $conn->query("ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Active'");
+    $userColResult = $conn->query("SHOW COLUMNS FROM users");
+    $userColumns = [];
+    if ($userColResult) { while ($col = $userColResult->fetch_assoc()) $userColumns[] = $col['Field']; }
+}
 
 $hasUserColumn = static function (string $column) use ($userColumns): bool { return in_array($column, $userColumns, true); };
 
@@ -17,21 +25,24 @@ $roleColumn     = $hasUserColumn('role')     ? 'role'     : "''";
 $barangayColumn = $hasUserColumn('barangay') ? 'barangay' : "''";
 $ageColumn      = $hasUserColumn('age')      ? 'age'      : "''";
 $statusColumn   = $hasUserColumn('status')   ? 'status'   : "''";
+$createdColumn  = $hasUserColumn('created_at') ? 'created_at' : null;
+$lastLoginColumn = $hasUserColumn('last_login') ? 'last_login' : ($hasUserColumn('login_at') ? 'login_at' : ($hasUserColumn('logged_in_at') ? 'logged_in_at' : null));
 
-$totalUsers   = (int)$conn->query("SELECT COUNT(*) as t FROM users")->fetch_assoc()['t'];
-$activeUsers  = $hasUserColumn('status') ? (int)$conn->query("SELECT COUNT(*) as t FROM users WHERE LOWER(status)='active'")->fetch_assoc()['t'] : $totalUsers;
-$adminCount   = $hasUserColumn('role')   ? (int)$conn->query("SELECT COUNT(*) as t FROM users WHERE LOWER(role)='admin'")->fetch_assoc()['t']   : 0;
+$totalUsers   = (int)$conn->query("SELECT COUNT(*) as t FROM users WHERE archived_at IS NULL")->fetch_assoc()['t'];
+$activeUsers  = $hasUserColumn('status') ? (int)$conn->query("SELECT COUNT(*) as t FROM users WHERE archived_at IS NULL AND LOWER(status)='active'")->fetch_assoc()['t'] : $totalUsers;
+$adminCount   = $hasUserColumn('role')   ? (int)$conn->query("SELECT COUNT(*) as t FROM users WHERE archived_at IS NULL AND LOWER(role)='admin'")->fetch_assoc()['t']   : 0;
 
 $search = trim($_GET['search'] ?? '');
 $roleFilter = trim($_GET['role'] ?? '');
 $statusFilter = trim($_GET['status'] ?? '');
-$barangayFilter = trim($_GET['barangay'] ?? '');
+$barangayFilter = '';
 $sort = trim($_GET['sort'] ?? 'newest');
 $pageNo = max(1, (int)($_GET['page'] ?? 1));
 $perPage = 10;
-$deleted = isset($_GET['deleted']) ? (int)$_GET['deleted'] : 0;
+$archived = isset($_GET['archived']) ? (int)$_GET['archived'] : 0;
 
 $conditions = [];
+$conditions[] = 'archived_at IS NULL';
 if ($search !== '') {
     $s = $conn->real_escape_string($search);
     if ($hasUserColumn('email')) {
@@ -49,11 +60,6 @@ if ($roleFilter !== '' && $hasUserColumn('role')) {
 if ($statusFilter !== '' && $hasUserColumn('status')) {
     $sf = $conn->real_escape_string($statusFilter);
     $conditions[] = "status = '$sf'";
-}
-
-if ($barangayFilter !== '' && $hasUserColumn('barangay')) {
-    $bf = $conn->real_escape_string($barangayFilter);
-    $conditions[] = "barangay = '$bf'";
 }
 
 $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
@@ -77,7 +83,7 @@ sort($roleOptions);
 
 $statusOptions = [];
 if ($hasUserColumn('status')) {
-    $statusRes = $conn->query("SELECT DISTINCT status AS v FROM users WHERE status IS NOT NULL AND TRIM(status) <> '' ORDER BY status ASC");
+    $statusRes = $conn->query("SELECT DISTINCT status AS v FROM users WHERE archived_at IS NULL AND status IS NOT NULL AND TRIM(status) <> '' ORDER BY status ASC");
     if ($statusRes) {
         while ($r = $statusRes->fetch_assoc()) {
             $statusOptions[] = (string)$r['v'];
@@ -109,7 +115,9 @@ $offset = ($pageNo - 1) * $perPage;
 
 $queryBase = "SELECT {$idColumn} AS user_id, {$nameColumn} AS display_name,
     {$emailColumn} AS display_email, {$roleColumn} AS display_role,
-    {$barangayColumn} AS display_barangay, {$ageColumn} AS display_age, {$statusColumn} AS display_status
+    {$barangayColumn} AS display_barangay, {$ageColumn} AS display_age, {$statusColumn} AS display_status,
+    " . ($createdColumn ? "{$createdColumn} AS display_created_at" : "NULL AS display_created_at") . ",
+    " . ($lastLoginColumn ? "{$lastLoginColumn} AS display_last_login" : "NULL AS display_last_login") . "
     FROM users {$where}";
 
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
@@ -388,7 +396,6 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                 <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="Search by name or email..." class="um-search-input">
                 <input type="hidden" name="role" value="<?= htmlspecialchars($roleFilter) ?>">
                 <input type="hidden" name="status" value="<?= htmlspecialchars($statusFilter) ?>">
-                <input type="hidden" name="barangay" value="<?= htmlspecialchars($barangayFilter) ?>">
                 <input type="hidden" name="sort" value="<?= htmlspecialchars($sort) ?>">
             </form>
             <form method="GET" class="um-toolbar-right um-filter-form">
@@ -405,13 +412,6 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                     <option value="">All Statuses</option>
                     <?php foreach ($statusOptions as $opt): ?>
                         <option value="<?= htmlspecialchars($opt) ?>" <?= $statusFilter === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
-                    <?php endforeach; ?>
-                </select>
-
-                <select name="barangay" class="um-select" onchange="this.form.submit()">
-                    <option value="">All Barangays</option>
-                    <?php foreach ($barangayOptions as $opt): ?>
-                        <option value="<?= htmlspecialchars($opt) ?>" <?= $barangayFilter === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
                     <?php endforeach; ?>
                 </select>
 
@@ -435,7 +435,7 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
         <div class="um-table-wrap">
             <table class="um-table">
                 <thead>
-                    <tr><th>User</th><th>Email</th><th>Role</th><th>Barangay</th><th>Age</th><th>Status</th><th>Actions</th></tr>
+                    <tr><th>User</th><th>Email</th><th>Role</th><th>Barangay</th><th>Age</th><th>Last Login</th><th>Status</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
                 <?php if ($users && $users->num_rows > 0): ?>
@@ -448,6 +448,8 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                     $brgy   = htmlspecialchars((string)($row['display_barangay'] ?? 'N/A'));
                     $age    = htmlspecialchars((string)($row['display_age'] ?? 'N/A'));
                     $status = trim((string)($row['display_status'] ?? ''));
+                    $lastLogin = strtotime((string)($row['display_last_login'] ?? ''));
+                    $lastLoginDisplay = $lastLogin ? date('M d, Y h:i A', $lastLogin) : 'Never';
                     $isActive = strtolower($status) === 'active';
                     $initial = strtoupper(substr($name, 0, 1)) ?: '?';
                     $colors  = ['#3b82f6','#6366f1','#8b5cf6','#10b981','#f59e0b','#ec4899'];
@@ -469,6 +471,7 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                     </td>
                     <td class="um-cell-muted"><?= $brgy ?></td>
                     <td class="um-cell-muted"><?= $age ?></td>
+                    <td class="um-cell-muted"><?= htmlspecialchars($lastLoginDisplay) ?></td>
                     <td>
                         <span class="um-status-badge <?= $isActive ? 'active' : 'inactive' ?>">
                             <span class="um-status-dot"></span>
@@ -480,15 +483,15 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                             <a href="edit_user.php?id=<?= urlencode((string)($row['user_id']??'')) ?>" class="um-action-btn edit" title="Edit">
                                 <i class="uil uil-edit"></i>
                             </a>
-                            <a href="delete_user.php?id=<?= urlencode((string)($row['user_id']??'')) ?>" class="um-action-btn delete" title="Delete">
-                                <i class="uil uil-trash"></i>
+                            <a href="delete_user.php?id=<?= urlencode((string)($row['user_id']??'')) ?>" class="um-action-btn delete" title="Archive">
+                                <i class="uil uil-archive"></i>
                             </a>
                         </div>
                     </td>
                 </tr>
                 <?php endwhile; ?>
                 <?php else: ?>
-                <tr><td colspan="7" class="um-empty">No users found.</td></tr>
+                <tr><td colspan="9" class="um-empty">No users found.</td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -519,9 +522,9 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
 <script>
 const fo=new IntersectionObserver(e=>e.forEach(en=>{if(en.isIntersecting){en.target.classList.add('visible');fo.unobserve(en.target);}}),{threshold:.1});
 document.querySelectorAll('.fade-up').forEach(el=>fo.observe(el));
-<?php if ($deleted): ?>
+<?php if ($archived): ?>
 if (window.AdminToast) {
-    window.AdminToast.show('success', 'User Deleted', 'The user account has been permanently removed from the system.');
+    window.AdminToast.show('success', 'User Archived', 'The account was deactivated and preserved in the archive.');
 }
 <?php endif; ?>
 </script>
@@ -555,7 +558,7 @@ if (window.AdminToast) {
 .um-btn-ghost:hover{border-color:#3b82f6;color:#3b82f6;}
 
 .um-table-wrap{overflow-x:auto;}
-.um-table{width:100%;border-collapse:collapse;font-size:13px;}
+.um-table{width:100%;min-width:1100px;border-collapse:collapse;font-size:13px;}
 .um-table th{padding:12px 16px;text-align:center;font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:var(--text-sub);font-weight:600;background:#fafbff;border-bottom:1px solid #e5e7eb;}
 .um-table td{padding:14px 16px;border-bottom:1px solid #f3f4f6;color:var(--text-main);text-align:center;}
 .um-table tbody tr:last-child td{border-bottom:none;}
@@ -585,5 +588,5 @@ if (window.AdminToast) {
 .um-page-btn:hover{border-color:#93c5fd;color:#1d4ed8;}
 .um-page-btn.disabled{pointer-events:none;opacity:.45;}
 
-@media(max-width:900px){.um-stats{grid-template-columns:repeat(2,1fr);}.um-body{padding:16px;}.um-search-form{max-width:none;}.um-footer{flex-direction:column;align-items:flex-start;}}
+@media(max-width:900px){.um-stats{grid-template-columns:repeat(2,1fr);}.um-body{padding:16px;}.um-search-form{max-width:none;}.um-footer{flex-direction:column;align-items:flex-start;}.um-table-wrap{overflow-x:auto;}.um-table{min-width:1100px;}}
 </style>

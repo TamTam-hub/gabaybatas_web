@@ -7,6 +7,10 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 }
 
 require_once '../config/database.php';
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
+$activeCaseWhere = 'archived_at IS NULL';
+$activeUserWhere = 'archived_at IS NULL';
 
 $userColumns = [];
 $userColResult = $conn->query("SHOW COLUMNS FROM users");
@@ -52,20 +56,20 @@ $casePriorityColumn   = $hasCaseColumn('priority') ? 'priority' : null;
 
 $activeUsers = 0;
 if ($userStatusColumn) {
-    $activeUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE LOWER($userStatusColumn) = 'active'");
+    $activeUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere AND LOWER($userStatusColumn) = 'active'");
     $activeUsers = (int)(($activeUsersRes ? $activeUsersRes->fetch_assoc()['total'] : 0) ?? 0);
 } else {
-    $activeUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users");
+    $activeUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere");
     $activeUsers = (int)(($activeUsersRes ? $activeUsersRes->fetch_assoc()['total'] : 0) ?? 0);
 }
 
-$totalUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users");
+$totalUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere");
 $totalUsers = (int)(($totalUsersRes ? $totalUsersRes->fetch_assoc()['total'] : 0) ?? 0);
 
 if ($barangaySourceColumn) {
     $barangayQuery = $hasCaseColumn('barangay')
-        ? "SELECT COUNT(DISTINCT barangay) AS total FROM cases WHERE barangay IS NOT NULL AND TRIM(barangay) <> ''"
-        : "SELECT COUNT(DISTINCT barangay) AS total FROM users WHERE barangay IS NOT NULL AND TRIM(barangay) <> ''";
+        ? "SELECT COUNT(DISTINCT barangay) AS total FROM cases WHERE $activeCaseWhere AND barangay IS NOT NULL AND TRIM(barangay) <> ''"
+        : "SELECT COUNT(DISTINCT barangay) AS total FROM users WHERE $activeUserWhere AND barangay IS NOT NULL AND TRIM(barangay) <> ''";
     $barangayResult = $conn->query($barangayQuery);
     $totalBarangays = (int)(($barangayResult ? $barangayResult->fetch_assoc()['total'] : 0) ?? 0);
 } else {
@@ -74,18 +78,18 @@ if ($barangaySourceColumn) {
 
 $casesThisMonth = 0;
 if ($caseDateColumn) {
-    $casesThisMonthResult = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE MONTH($caseDateColumn) = MONTH(CURRENT_DATE()) AND YEAR($caseDateColumn) = YEAR(CURRENT_DATE())");
+    $casesThisMonthResult = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND MONTH($caseDateColumn) = MONTH(CURRENT_DATE()) AND YEAR($caseDateColumn) = YEAR(CURRENT_DATE())");
     $casesThisMonth = (int)(($casesThisMonthResult ? $casesThisMonthResult->fetch_assoc()['total'] : 0) ?? 0);
 }
 
-$totalCases    = (int)($conn->query("SELECT COUNT(*) AS total FROM cases")->fetch_assoc()['total'] ?? 0);
-$pendingCases  = $caseStatusColumn ? (int)($conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($caseStatusColumn) = 'pending'")->fetch_assoc()['total'] ?? 0) : 0;
-$progressCases = $caseStatusColumn ? (int)($conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($caseStatusColumn) = 'in progress'")->fetch_assoc()['total'] ?? 0) : 0;
-$resolvedCases = $caseStatusColumn ? (int)($conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($caseStatusColumn) = 'resolved'")->fetch_assoc()['total'] ?? 0) : 0;
+$totalCases    = (int)($conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere")->fetch_assoc()['total'] ?? 0);
+$pendingCases  = $caseStatusColumn ? (int)($conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'pending'")->fetch_assoc()['total'] ?? 0) : 0;
+$progressCases = $caseStatusColumn ? (int)($conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'in progress'")->fetch_assoc()['total'] ?? 0) : 0;
+$resolvedCases = $caseStatusColumn ? (int)($conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'resolved'")->fetch_assoc()['total'] ?? 0) : 0;
 
 $avgResolution = 0;
 if ($caseDateColumn && $hasCaseColumn('updated_at') && $caseStatusColumn) {
-    $avgSql = "SELECT AVG(TIMESTAMPDIFF(DAY, $caseDateColumn, updated_at)) AS avg_days FROM cases WHERE LOWER($caseStatusColumn) = 'resolved' AND $caseDateColumn IS NOT NULL AND updated_at IS NOT NULL";
+    $avgSql = "SELECT AVG(TIMESTAMPDIFF(DAY, $caseDateColumn, updated_at)) AS avg_days FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'resolved' AND $caseDateColumn IS NOT NULL AND updated_at IS NOT NULL";
     $avgResult = $conn->query($avgSql);
     $avgResolution = (int)round((float)(($avgResult ? $avgResult->fetch_assoc()['avg_days'] : 0) ?? 0));
 }
@@ -108,9 +112,9 @@ if ($caseDateColumn && $caseStatusColumn) {
         $monthYear  = $monthDate->format('Y');
         $months[]   = $monthLabel;
         $monthExpr  = "MONTH($caseDateColumn) = '{$monthDate->format('m')}' AND YEAR($caseDateColumn) = '$monthYear'";
-        $pendingResult  = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $monthExpr AND LOWER($caseStatusColumn) = 'pending'");
-        $progressResult = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $monthExpr AND LOWER($caseStatusColumn) = 'in progress'");
-        $resolvedResult = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $monthExpr AND LOWER($caseStatusColumn) = 'resolved'");
+        $pendingResult  = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $monthExpr AND LOWER($caseStatusColumn) = 'pending'");
+        $progressResult = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $monthExpr AND LOWER($caseStatusColumn) = 'in progress'");
+        $resolvedResult = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $monthExpr AND LOWER($caseStatusColumn) = 'resolved'");
         $pendingData[]  = (int)(($pendingResult  ? $pendingResult->fetch_assoc()['total']  : 0) ?? 0);
         $progressData[] = (int)(($progressResult ? $progressResult->fetch_assoc()['total'] : 0) ?? 0);
         $resolvedData[] = (int)(($resolvedResult ? $resolvedResult->fetch_assoc()['total'] : 0) ?? 0);
@@ -125,7 +129,7 @@ if ($caseDateColumn && $caseStatusColumn) {
 $typeLabels = ['No Data'];
 $typeValues = [0];
 if ($caseTypeColumn) {
-    $typeResult = $conn->query("SELECT $caseTypeColumn AS type_name, COUNT(*) AS total FROM cases WHERE $caseTypeColumn IS NOT NULL AND $caseTypeColumn <> '' GROUP BY $caseTypeColumn ORDER BY total DESC LIMIT 5");
+    $typeResult = $conn->query("SELECT $caseTypeColumn AS type_name, COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $caseTypeColumn IS NOT NULL AND $caseTypeColumn <> '' GROUP BY $caseTypeColumn ORDER BY total DESC LIMIT 5");
     if ($typeResult && $typeResult->num_rows > 0) {
         $typeLabels = []; $typeValues = [];
         while ($row = $typeResult->fetch_assoc()) {
@@ -139,8 +143,8 @@ $barangayLabels = ['No Data'];
 $barangayValues = [0];
 if ($barangaySourceColumn) {
     $bResult = $hasCaseColumn('barangay')
-        ? $conn->query("SELECT barangay AS name, COUNT(*) AS total FROM cases WHERE barangay IS NOT NULL AND TRIM(barangay) <> '' GROUP BY barangay ORDER BY total DESC LIMIT 5")
-        : $conn->query("SELECT barangay AS name, COUNT(*) AS total FROM users WHERE barangay IS NOT NULL AND TRIM(barangay) <> '' GROUP BY barangay ORDER BY total DESC LIMIT 5");
+        ? $conn->query("SELECT barangay AS name, COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND barangay IS NOT NULL AND TRIM(barangay) <> '' GROUP BY barangay ORDER BY total DESC LIMIT 5")
+        : $conn->query("SELECT barangay AS name, COUNT(*) AS total FROM users WHERE $activeUserWhere AND barangay IS NOT NULL AND TRIM(barangay) <> '' GROUP BY barangay ORDER BY total DESC LIMIT 5");
     if ($bResult && $bResult->num_rows > 0) {
         $barangayLabels = []; $barangayValues = [];
         while ($row = $bResult->fetch_assoc()) {
@@ -153,10 +157,10 @@ if ($barangaySourceColumn) {
 $activeOfficials = $activeUsers;
 $dailyLogins = 0;
 if ($userLoginColumn) {
-    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE DATE($userLoginColumn) = CURRENT_DATE()");
+    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere AND DATE($userLoginColumn) = CURRENT_DATE()");
     $dailyLogins = (int)(($loginRes ? $loginRes->fetch_assoc()['total'] : 0) ?? 0);
 } elseif ($userUpdatedColumn) {
-    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE DATE($userUpdatedColumn) = CURRENT_DATE()");
+    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere AND DATE($userUpdatedColumn) = CURRENT_DATE()");
     $dailyLogins = (int)(($loginRes ? $loginRes->fetch_assoc()['total'] : 0) ?? 0);
 }
 if ($dailyLogins <= 0) {
@@ -231,16 +235,6 @@ $maxTypeValue = max(array_column($topCaseData, 'value') ?: [1]);
                 </div>
                 <div class="an-kpi-trend neutral" id="activeUsersTrend"><i class="uil uil-users-alt"></i> <?= (int)$activeUsers ?> live</div>
             </div>
-            <div class="an-kpi fade-up" style="--d:.15s">
-                <div class="an-kpi-icon" style="--c:#8b5cf6;--cb:#f5f3ff">
-                    <i class="uil uil-map-marker"></i>
-                </div>
-                <div class="an-kpi-body">
-                    <div class="an-kpi-label">Total Barangays</div>
-                    <div class="an-kpi-val" id="totalBarangaysValue" data-count="<?= (int)$totalBarangays ?>">0</div>
-                </div>
-                <div class="an-kpi-trend neutral" id="totalBarangaysTrend"><i class="uil uil-map-marker"></i> <?= (int)$totalBarangays ?> unique</div>
-            </div>
             <div class="an-kpi fade-up" style="--d:.2s">
                 <div class="an-kpi-icon" style="--c:#f59e0b;--cb:#fffbeb">
                     <i class="uil uil-file-alt"></i>
@@ -313,17 +307,6 @@ $maxTypeValue = max(array_column($topCaseData, 'value') ?: [1]);
                     <?php endforeach; ?>
                 </div>
             </div>
-        </div>
-
-        <!-- Bar Chart -->
-        <div class="an-card fade-up" style="--d:.35s; margin-bottom:16px;">
-            <div class="an-card-head">
-                <div>
-                    <div class="an-card-title">Cases by Barangay</div>
-                    <div class="an-card-sub">Distribution across the most active barangays</div>
-                </div>
-            </div>
-            <div class="an-chart-wrap" style="height:200px"><canvas id="barangayChart"></canvas></div>
         </div>
 
         <!-- Bottom Row -->
@@ -600,50 +583,9 @@ window.addEventListener('load', () => {
         }
     });
 
-    // ── Bar Chart
-    const barangayChart = new Chart(document.getElementById('barangayChart'), {
-        type: 'bar',
-        data: {
-            labels: <?= json_encode($barangayLabels) ?>,
-            datasets: [{
-                label: 'Cases',
-                data: <?= json_encode($barangayValues) ?>,
-                backgroundColor: ctx => {
-                    const g = ctx.chart.ctx.createLinearGradient(0,0,0,200);
-                    g.addColorStop(0,'#3b82f6');
-                    g.addColorStop(1,'rgba(59,130,246,.4)');
-                    return g;
-                },
-                borderRadius: { topLeft: 8, topRight: 8 },
-                borderSkipped: false,
-                hoverBackgroundColor: '#2563eb'
-            }]
-        },
-        options: {
-            responsive: true, maintainAspectRatio: false,
-            animation: { duration: 1600, easing: 'easeOutBounce', delay: ctx => ctx.dataIndex * 80 },
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    backgroundColor: '#fff',
-                    titleColor: '#111', bodyColor: '#444',
-                    borderColor: '#e5e7eb', borderWidth: 1,
-                    padding: 10, cornerRadius: 10,
-                    titleFont: { family: FF, size: 12 },
-                    bodyFont:  { family: FF, size: 12 }
-                }
-            },
-            scales: {
-                x: { grid: { display: false }, ticks: { font: { family: FF, size: 12 }, color: '#6b7280' }, border: { display: false } },
-                y: { grid: { color: GC }, ticks: { font: { family: FF, size: 12 }, color: '#6b7280' }, border: { display: false }, beginAtZero: true }
-            }
-        }
-    });
-
     const numberTargets = {
         avgResolutionValue: document.getElementById('avgResolutionValue'),
         activeUsersValue: document.getElementById('activeUsersValue'),
-        totalBarangaysValue: document.getElementById('totalBarangaysValue'),
         casesThisMonthValue: document.getElementById('casesThisMonthValue'),
         pendingCasesValue: document.getElementById('pendingCasesValue'),
         progressCasesValue: document.getElementById('progressCasesValue'),
@@ -697,7 +639,6 @@ window.addEventListener('load', () => {
             const metrics = payload.metrics || {};
             updateNumeric(numberTargets.avgResolutionValue, metrics.avgResolution ?? 0);
             updateNumeric(numberTargets.activeUsersValue, metrics.activeUsers ?? 0);
-            updateNumeric(numberTargets.totalBarangaysValue, metrics.totalBarangays ?? 0);
             updateNumeric(numberTargets.casesThisMonthValue, metrics.casesThisMonth ?? 0);
             updateNumeric(numberTargets.pendingCasesValue, metrics.pendingCases ?? 0);
             updateNumeric(numberTargets.progressCasesValue, metrics.progressCases ?? 0);

@@ -21,6 +21,12 @@
         <a href="cases.php" <?= ($page === 'cases.php') ? 'class="active"' : '' ?>>
             <i class="uil uil-file-alt"></i> Cases
         </a>
+        <a href="case_process.php" <?= ($page === 'case_process.php') ? 'class="active"' : '' ?>>
+            <i class="uil uil-balance-scale"></i> Case Process
+        </a>
+        <a href="kp_reports.php" <?= ($page === 'kp_reports.php') ? 'class="active"' : '' ?>>
+            <i class="uil uil-file-graph"></i> KP Reports
+        </a>
         <a href="reports.php" <?= ($page === 'reports.php') ? 'class="active"' : '' ?>>
             <i class="uil uil-chart-bar"></i> Reports
         </a>

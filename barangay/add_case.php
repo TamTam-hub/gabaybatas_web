@@ -26,7 +26,7 @@ $residentColumn = $hasColumn('name') ? 'name' : ($hasColumn('resident_name') ? '
 $complainedColumn = $hasColumn('complained_person') ? 'complained_person' : ($hasColumn('respondent_name') ? 'respondent_name' : ($hasColumn('against_person') ? 'against_person' : null));
 $typeColumn = $hasColumn('case_type') ? 'case_type' : ($hasColumn('type') ? 'type' : null);
 $statusColumn = $hasColumn('status') ? 'status' : null;
-$priorityColumn = $hasColumn('priority') ? 'priority' : null;
+$caseIdColumn = $hasColumn('case_id') ? 'case_id' : null;
 $barangayColumn = $hasColumn('barangay') ? 'barangay' : null;
 $dateColumn = $hasColumn('date_submitted') ? 'date_submitted' : null;
 $descriptionColumn = $hasColumn('description') ? 'description' : ($hasColumn('details') ? 'details' : ($hasColumn('remarks') ? 'remarks' : ($hasColumn('notes') ? 'notes' : null)));
@@ -41,7 +41,6 @@ $resident = trim((string)($_POST['resident_name'] ?? ''));
 $complainedPerson = trim((string)($_POST['complained_person'] ?? ''));
 $caseType = trim((string)($_POST['case_type'] ?? ''));
 $status = trim((string)($_POST['status'] ?? 'Pending'));
-$priority = trim((string)($_POST['priority'] ?? ''));
 $description = trim((string)($_POST['description'] ?? ''));
 
 $allowedCaseTypes = gabaybatas_case_types();
@@ -50,7 +49,6 @@ if ($caseType === '') {
     $caseType = $allowedCaseTypes[0];
 }
 $allowedStatuses = ['Pending', 'In Progress', 'Resolved'];
-$allowedPriorities = ['Low', 'Medium', 'High'];
 $appTimezone = new DateTimeZone('Asia/Manila');
 $filedAtDisplay = (new DateTimeImmutable('now', $appTimezone))->format('M d, Y');
 
@@ -61,8 +59,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaError === '') {
         $error = 'Please select a valid case type.';
     } elseif ($statusColumn && !in_array($status, $allowedStatuses, true)) {
         $error = 'Please select a valid status.';
-    } elseif ($priorityColumn && $priority !== '' && !in_array($priority, $allowedPriorities, true)) {
-        $error = 'Please select a valid priority.';
     } else {
         $caseTypeToSave = $caseType;
         $insertColumns = [];
@@ -94,13 +90,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaError === '') {
             $values[] = $status;
         }
 
-        if ($priorityColumn && $priority !== '') {
-            $insertColumns[] = $priorityColumn;
-            $placeholders[] = '?';
-            $types .= 's';
-            $values[] = $priority;
-        }
-
         if ($barangayColumn && $currentBarangay !== '') {
             $insertColumns[] = $barangayColumn;
             $placeholders[] = '?';
@@ -130,6 +119,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaError === '') {
         } else {
             $stmt->bind_param($types, ...$values);
             if ($stmt->execute()) {
+                if ($caseIdColumn !== null) {
+                    $newCaseId = 'C-' . str_pad((string)$stmt->insert_id, 4, '0', STR_PAD_LEFT);
+                    $caseIdUpdate = $conn->prepare("UPDATE cases SET {$caseIdColumn} = ? WHERE id = ? LIMIT 1");
+                    if ($caseIdUpdate) {
+                        $caseRowId = (int)$stmt->insert_id;
+                        $caseIdUpdate->bind_param('si', $newCaseId, $caseRowId);
+                        $caseIdUpdate->execute();
+                        $caseIdUpdate->close();
+                    }
+                }
                 header('Location: cases.php?created=1');
                 exit();
             }
@@ -200,16 +199,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $schemaError === '') {
                             <select name="status">
                                 <?php foreach ($allowedStatuses as $opt): ?>
                                     <option value="<?= htmlspecialchars($opt) ?>" <?= $status === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-
-                        <div class="acs-field">
-                            <label>Priority</label>
-                            <select name="priority">
-                                <option value="">Not set</option>
-                                <?php foreach ($allowedPriorities as $opt): ?>
-                                    <option value="<?= htmlspecialchars($opt) ?>" <?= $priority === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
                                 <?php endforeach; ?>
                             </select>
                         </div>

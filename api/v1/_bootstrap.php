@@ -5,11 +5,13 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/barangays.php';
 require_once __DIR__ . '/../../config/case_types.php';
+require_once __DIR__ . '/../../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
 
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -38,6 +40,15 @@ function api_error(string $message, int $statusCode = 400, array $extra = []): v
         'message' => $message,
         'generated_at' => api_now_manila_iso(),
     ], $extra), $statusCode);
+}
+
+function api_require_barangay(string $barangay): string
+{
+    if (!gabaybatas_is_valid_barangay($barangay)) {
+        api_error('Only Barangay Muñoz is supported.', 422);
+    }
+
+    return 'Barangay Muñoz';
 }
 
 function api_success(array $data = [], int $statusCode = 200): void
@@ -116,25 +127,17 @@ function api_case_status_allowed(string $status): bool
 
 function api_normalize_case_type(string $input): string
 {
-    $normalized = trim((string)(preg_replace('/\s+/', ' ', $input) ?? ''));
-    if ($normalized === '') {
-        return '';
-    }
-
-    foreach (gabaybatas_case_types() as $type) {
-        if (strtolower($type) === strtolower($normalized)) {
-            return $type;
-        }
-    }
-
-    return '';
+    return gabaybatas_normalize_case_type($input);
 }
 
 function api_apply_referral_logic(string $caseType, string $barangay): array
 {
     $normalized = strtolower($caseType);
 
-    $minorKeywords = ['minor dispute', 'noise complaint', 'boundary dispute', 'public disturbance', 'domestic dispute'];
+    $minorKeywords = [
+        'minor dispute', 'noise complaint', 'boundary dispute', 'public disturbance', 'domestic dispute',
+        'family dispute', 'unpaid debt', 'oral defamation', 'trespassing', 'rental dispute', 'swindling', 'other dispute',
+    ];
     $seriousKeywords = ['serious/legal', 'serious legal', 'rape', 'homicide', 'drug', 'physical injury', 'theft'];
 
     $isMinor = false;

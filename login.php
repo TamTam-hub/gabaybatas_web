@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once __DIR__ . '/config/database.php';
+require_once __DIR__ . '/config/barangays.php';
 $error = '';
 if (isset($_SESSION['role'])) {
     if ($_SESSION['role'] === 'admin')    { header('Location: admin/dashboard.php'); exit(); }
@@ -31,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($role !== '') {
                         $_SESSION['user_id'] = $user['id'] ?? null;
                         $_SESSION['name']    = $user['name'] ?? ($user['username'] ?? $username);
-                        $_SESSION['barangay']= $user['barangay'] ?? '';
+                        $_SESSION['barangay']= 'Barangay Muñoz';
                         $_SESSION['role']    = $role;
                         header('Location: ' . ($role === 'admin' ? 'admin/dashboard.php' : 'barangay/home.php'));
                         exit();
@@ -378,6 +379,12 @@ body {
         <div class="card-footer">
             <i class="uil uil-info-circle"></i>
             <p>Use <strong>admin</strong> credentials for Administrator access. Barangay officials must use their assigned barangay account.</p>
+        </div>
+
+        <div style="padding:14px 28px 20px;text-align:center;border-top:1px solid rgba(255,255,255,0.08);">
+            <a href="track.php" style="color:#93c5fd;font-size:13px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);transition:all 0.2s;">
+                <i class="uil uil-search-alt" style="font-size:16px;"></i> Are you a resident? Track your case status &rarr;
+            </a>
         </div>
     </div>
 

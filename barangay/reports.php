@@ -31,6 +31,7 @@ $typeColumn = $hasColumn('case_type') ? 'case_type' : ($hasColumn('type') ? 'typ
 $statusColumn = $hasColumn('status') ? 'status' : null;
 $dateColumn = $hasColumn('date_submitted') ? 'date_submitted' : ($hasColumn('created_at') ? 'created_at' : ($hasColumn('updated_at') ? 'updated_at' : null));
 $hasCaseBarangay = $hasColumn('barangay');
+$hasArchivedAt = $hasColumn('archived_at');
 
 $reportType = strtolower(trim((string)($_GET['type'] ?? 'all')));
 $allowedReportTypes = ['all', 'monthly', 'quarterly', 'yearly'];
@@ -71,7 +72,7 @@ if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
     $dateTo = $tmp;
 }
 
-$scopeSql = '';
+$scopeSql = $hasArchivedAt ? " AND archived_at IS NULL" : '';
 if ($hasCaseBarangay && $currentBarangay !== '') {
     $scopeSql = " AND LOWER(barangay) = LOWER('" . $conn->real_escape_string($currentBarangay) . "')";
 }
@@ -279,7 +280,7 @@ $allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
                     <label class="filter-label">Report Scope</label>
                     <select class="filter-input" name="type" id="reportTypeInput">
                         <option value="all" <?= $reportType === 'all' ? 'selected' : '' ?>>All Periods</option>
-                        <option value="monthly" <?= $reportType === 'monthly' ? 'selected' : '' ?>>This Month</option>
+                        <option value="monthly" <?= $reportType === 'monthly' ? 'selected' : '' ?>>This Month (KP Monitoring Form No. 1)</option>
                         <option value="quarterly" <?= $reportType === 'quarterly' ? 'selected' : '' ?>>This Quarter</option>
                         <option value="yearly" <?= $reportType === 'yearly' ? 'selected' : '' ?>>This Year</option>
                     </select>
@@ -385,6 +386,13 @@ $allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
                 </div>
             </div>
         </div>
+
+        <?php if ($reportType === 'monthly' && !$includeAll): ?>
+        <div class="card-box" style="border-left:4px solid #2563eb;">
+            <div class="section-heading">Monthly report: KP Monitoring Form No. 1</div>
+            <div class="section-heading-sub">The monthly download uses the official DILG format: KP cases filed this month, their nature and the action taken. The status, type and search filters do not apply to it. For another month, use <a href="kp_reports.php">KP Reports</a>.</div>
+        </div>
+        <?php endif; ?>
 
         <div class="card-box">
             <div class="table-card-header">

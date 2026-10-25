@@ -7,9 +7,12 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 }
 
 require_once '../config/database.php';
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
 
 $caseIdParam = trim((string)($_GET['id'] ?? $_POST['id'] ?? ''));
 $error = '';
+$reason = trim((string)($_POST['archive_reason'] ?? ''));
 
 $caseColumns = [];
 $colResult = $conn->query("SHOW COLUMNS FROM cases");
@@ -59,17 +62,35 @@ if ($caseIdParam === '') {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
-        $deleteSql = "DELETE FROM cases WHERE $idColumn = ? LIMIT 1";
-        $stmt = $conn->prepare($deleteSql);
+        if ($reason === '') {
+            $error = 'Please provide a reason for archiving this case.';
+        }
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
+        $archiveSql = "UPDATE cases
+            SET archived_at = NOW(), archived_by = ?, archive_reason = ?
+            WHERE $idColumn = ? AND (archived_at IS NULL) LIMIT 1";
+        $stmt = $conn->prepare($archiveSql);
         if (!$stmt) {
-            $error = 'Unable to prepare delete query.';
+            $error = 'Unable to prepare archive query.';
         } else {
-            $stmt->bind_param('s', $caseIdParam);
+            $adminId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+            $stmt->bind_param('iss', $adminId, $reason, $caseIdParam);
             if ($stmt->execute()) {
-                header('Location: all_cases.php?deleted=1');
-                exit();
+                if ($stmt->affected_rows === 1) {
+                    gabaybatas_archive_audit($conn, 'case_archived', 'case', $caseIdParam, $reason, $case, [
+                        'archived_at' => date('Y-m-d H:i:s'),
+                        'archive_reason' => $reason,
+                    ]);
+                    header('Location: all_cases.php?archived=1');
+                    exit();
+                }
+                $error = 'This case is already archived or could not be updated.';
             }
-            $error = 'Unable to delete this case. Please try again.';
+            if ($stmt->errno !== 0) {
+                $error = 'Unable to archive this case. Please try again.';
+            }
             $stmt->close();
         }
     }
@@ -99,7 +120,7 @@ if ($caseIdParam === '') {
 
     <div class="page-body dc-body">
         <div class="dc-head fade-up" style="--d:0s">
-            <p class="dc-sub">Remove a case record from the database. This action is permanent.</p>
+            <p class="dc-sub">Move a case out of active records while preserving its official history.</p>
             <a href="all_cases.php" class="dc-back-btn"><i class="uil uil-arrow-left"></i> Back to All Cases</a>
         </div>
 
@@ -114,8 +135,8 @@ if ($caseIdParam === '') {
                 <div class="dc-warning">
                     <div class="dc-warning-icon"><i class="uil uil-exclamation-triangle"></i></div>
                     <div>
-                        <div class="dc-warning-title">Confirm deletion</div>
-                        <div class="dc-warning-text">Case ID C-<?= htmlspecialchars((string)($case['display_case_id'] ?? $caseIdParam)) ?> will be permanently deleted from the system.</div>
+                        <div class="dc-warning-title">Confirm case archiving</div>
+                        <div class="dc-warning-text">Case ID C-<?= htmlspecialchars((string)($case['display_case_id'] ?? $caseIdParam)) ?> will be hidden from active records. Its case history and evidence will be preserved.</div>
                     </div>
                 </div>
 
@@ -128,8 +149,10 @@ if ($caseIdParam === '') {
 
                 <form method="POST" class="dc-actions">
                     <input type="hidden" name="id" value="<?= htmlspecialchars($caseIdParam) ?>">
+                    <label class="dc-reason-label" for="archive_reason">Reason for archiving</label>
+                    <textarea id="archive_reason" name="archive_reason" required maxlength="500" class="dc-reason" placeholder="Explain why this case is being archived"><?= htmlspecialchars($reason) ?></textarea>
                     <a href="all_cases.php" class="dc-cancel">Cancel</a>
-                    <button type="submit" class="dc-delete"><i class="uil uil-trash-alt"></i> Delete Case</button>
+                    <button type="submit" class="dc-delete"><i class="uil uil-archive"></i> Archive Case</button>
                 </form>
             <?php endif; ?>
         </div>
@@ -165,6 +188,8 @@ document.querySelectorAll('.fade-up').forEach(el => dcObserver.observe(el));
 .dc-item span { display:block; font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-sub); font-weight:700; margin-bottom:6px; }
 .dc-item strong { font-size:13px; color:var(--text-main); }
 .dc-actions { display:flex; justify-content:flex-end; gap:8px; }
+.dc-reason-label { flex-basis:100%; font-size:12px; font-weight:700; color:#475569; }
+.dc-reason { flex-basis:100%; min-height:78px; resize:vertical; border:1px solid #cbd5e1; border-radius:9px; padding:9px 10px; font:inherit; font-size:12.5px; color:#1e293b; }
 .dc-cancel, .dc-delete { display:inline-flex; align-items:center; justify-content:center; gap:6px; border-radius:9px; padding:9px 14px; font-size:12.5px; font-weight:600; text-decoration:none; }
 .dc-cancel { border:1px solid #e2e8f0; color:#475569; background:#fff; }
 .dc-delete { border:none; background:#dc2626; color:#fff; cursor:pointer; }

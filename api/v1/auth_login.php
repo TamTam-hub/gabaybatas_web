@@ -6,6 +6,7 @@ require_once __DIR__ . '/_bootstrap.php';
 
 api_require_method('POST');
 api_ensure_mobile_tables($conn);
+api_ensure_user_profile_columns($conn);
 
 $payload = api_input();
 $credential = trim((string)($payload['email'] ?? ''));
@@ -23,6 +24,7 @@ if (!$user) {
 $userColumns = api_user_columns($conn);
 $passwordColumn = api_pick_column($userColumns, ['password']);
 $statusColumn = api_pick_column($userColumns, ['status']);
+$verifiedColumn = api_pick_column($userColumns, ['email_verified']);
 
 if ($passwordColumn === null) {
     api_error('Users table is missing password support.', 500);
@@ -52,6 +54,20 @@ if ($statusColumn !== null) {
     }
 }
 
+// THIS IS MOVED OUTSIDE THE statusColumn NULL CHECK!
+if ($verifiedColumn !== null &&
+    strtolower((string)($user['role'] ?? '')) === 'resident' &&
+    (int)($user['email_verified'] ?? 0) !== 1) {
+    api_error('Please verify your Gmail address before signing in.', 403);
+}
+
+$loginUpdate = $conn->prepare('UPDATE users SET last_login = NOW() WHERE id = ? LIMIT 1');
+if ($loginUpdate) {
+    $loginUpdate->bind_param('s', $userId);
+    $loginUpdate->execute();
+    $loginUpdate->close();
+}
+
 $tokenData = api_issue_token($conn, $userId);
 if (!$tokenData) {
     api_error('Unable to create access token.', 500);
@@ -60,7 +76,7 @@ if (!$tokenData) {
 $_SESSION['user_id'] = $userId;
 $_SESSION['name'] = (string)($user['name'] ?? '');
 $_SESSION['role'] = (string)($user['role'] ?? 'resident');
-$_SESSION['barangay'] = (string)($user['barangay'] ?? '');
+$_SESSION['barangay'] = 'Barangay MuÃ±oz';
 
 api_success([
     'message' => 'Login successful.',

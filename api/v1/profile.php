@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/_bootstrap.php';
 
 api_ensure_mobile_tables($conn);
+api_ensure_user_profile_columns($conn);
 $user = api_current_user($conn);
 if (!$user) {
     api_error('Unauthorized. Token is invalid or expired.', 401);
@@ -33,11 +34,13 @@ $contactNumber = trim((string)($payload['contact_number'] ?? $current['contact_n
 $age = trim((string)($payload['age'] ?? $current['age'] ?? ''));
 $barangay = trim((string)($payload['barangay'] ?? $current['barangay'] ?? ''));
 
+$barangay = api_require_barangay($barangay);
+
 if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     api_error('Please enter a valid email address.', 422);
 }
 
-$nameColumn = api_pick_column($userColumns, ['name']);
+$nameColumn = api_pick_column($userColumns, ['name', 'full_name']);
 $emailColumn = api_pick_column($userColumns, ['email']);
 $contactColumn = api_pick_column($userColumns, ['contact_number', 'contact', 'phone']);
 $ageColumn = api_pick_column($userColumns, ['age']);

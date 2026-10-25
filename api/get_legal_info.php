@@ -35,7 +35,8 @@ try {
         ]
     );
 
-    $sql = "SELECT id, title, content, category, file_path, `reference`, created_at FROM legal_information ORDER BY created_at DESC, id DESC";
+    $sql = "SELECT id, title, summary, content, category, offense_class, report_to, case_type, sort_order, file_path, `reference`, created_at
+            FROM legal_information ORDER BY sort_order ASC, id ASC";
     $stmt = $pdo->query($sql);
     $rows = $stmt->fetchAll();
 

@@ -7,6 +7,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'barangay') {
 }
 
 require_once '../config/database.php';
+require_once '../config/kp.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
 gabaybatas_block_barangay_delete_requests();
 
@@ -42,11 +43,14 @@ if ($caseIdParam === '') {
     $error = 'Case table is missing an identifiable primary column.';
 } else {
     $selectFields = [];
+    if ($hasColumn('id')) { $selectFields[] = "id AS numeric_case_id"; }
+    if ($hasColumn('case_id')) { $selectFields[] = "case_id AS case_code"; }
     if ($displayIdCol)   { $selectFields[] = "$displayIdCol AS display_case_id"; }
     if ($residentColumn) { $selectFields[] = "$residentColumn AS resident_name"; }
     if ($complainedColumn) { $selectFields[] = "$complainedColumn AS complained_person"; }
     if ($typeColumn)     { $selectFields[] = "$typeColumn AS case_type"; }
     if ($statusColumn)   { $selectFields[] = "$statusColumn AS case_status"; }
+    if ($hasColumn("kp_status")) { $selectFields[] = "kp_status AS case_kp_status"; }
     if ($dateColumn)     { $selectFields[] = "$dateColumn AS case_date"; }
     if ($descColumn)     { $selectFields[] = "$descColumn AS case_description"; }
     if ($hasColumn('barangay')) { $selectFields[] = "barangay AS case_barangay"; }
@@ -54,10 +58,21 @@ if ($caseIdParam === '') {
     if (!$selectFields) {
         $error = 'No readable fields found in case table.';
     } else {
-        $sql = "SELECT " . implode(', ', $selectFields) . " FROM cases WHERE $idColumn = ? LIMIT 1";
+        $hasBothIdentifiers = $hasColumn('id') && $hasColumn('case_id');
+        $whereClause = $hasBothIdentifiers
+            ? '(id = ? OR case_id = ?)'
+            : "$idColumn = ?";
+        if ($hasColumn('archived_at')) {
+            $whereClause .= ' AND archived_at IS NULL';
+        }
+        $sql = "SELECT " . implode(', ', $selectFields) . " FROM cases WHERE $whereClause LIMIT 1";
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param('s', $caseIdParam);
+            if ($hasBothIdentifiers) {
+                $stmt->bind_param('ss', $caseIdParam, $caseIdParam);
+            } else {
+                $stmt->bind_param('s', $caseIdParam);
+            }
             $stmt->execute();
             $res = $stmt->get_result();
             $case = $res ? $res->fetch_assoc() : null;
@@ -66,6 +81,23 @@ if ($caseIdParam === '') {
 
         if (!$case) {
             $error = 'Case not found.';
+        }
+
+        $evidence = [];
+        if ($error === '' && $case) {
+            $numId = (int)($case['numeric_case_id'] ?? (is_numeric($caseIdParam) ? $caseIdParam : 0));
+            $codeId = (string)($case['case_code'] ?? $case['display_case_id'] ?? $caseIdParam);
+            $evidenceStmt = $conn->prepare(
+                'SELECT id, evidence_type, original_filename, mime_type, file_size
+                 FROM api_case_evidence WHERE case_id = ? OR case_id = ? ORDER BY id ASC'
+            );
+            if ($evidenceStmt) {
+                $evidenceStmt->bind_param('is', $numId, $codeId);
+                $evidenceStmt->execute();
+                $evidenceResult = $evidenceStmt->get_result();
+                $evidence = $evidenceResult ? $evidenceResult->fetch_all(MYSQLI_ASSOC) : [];
+                $evidenceStmt->close();
+            }
         }
 
         if ($error === '' && $_SESSION['role'] === 'barangay') {
@@ -108,8 +140,12 @@ if ($caseIdParam === '') {
         <div class="vc-head">
             <p class="vc-sub">Review complete information for the selected case.</p>
             <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;">
+                <?php if ($error === ''): ?>
+                <a href="case_process.php?id=<?= urlencode($caseIdParam) ?>" class="vc-update-btn" style="background:#2563eb;color:#fff;"><i class="uil uil-balance-scale"></i> Process in KP</a>
+                
+                <?php endif; ?>
                 <?php if ($canEditCase && $error === ''): ?>
-                <a href="update_case.php?id=<?= urlencode($caseIdParam) ?>" class="vc-update-btn"><i class="uil uil-edit"></i> Update Case</a>
+                <a href="update_case.php?id=<?= urlencode($caseIdParam) ?>" class="vc-update-btn"><i class="uil uil-edit"></i> Edit Case</a>
                 <?php endif; ?>
                 <a href="cases.php" class="vc-back-btn"><i class="uil uil-arrow-left"></i> Back to Cases</a>
             </div>
@@ -124,8 +160,10 @@ if ($caseIdParam === '') {
                 </div>
             <?php else: ?>
                 <?php
-                $status = trim((string)($case['case_status'] ?? 'N/A'));
-                $statusClass = $status === 'Pending' ? 'pending' : ($status === 'Resolved' ? 'resolved' : 'progress');
+                $rawKp = trim((string)($case['case_kp_status'] ?? ''));
+                $status = ($rawKp !== '' && function_exists('kp_status_label')) ? kp_status_label($rawKp) : trim((string)($case['case_status'] ?? 'N/A'));
+                $statusColor = ($rawKp !== '' && function_exists('kp_status_color')) ? kp_status_color($rawKp) : (($case['case_status'] ?? '') === 'Resolved' ? '#16a34a' : ((($case['case_status'] ?? '') === 'In Progress') ? '#2563eb' : '#f59e0b'));
+                $statusClass = ($case['case_status'] ?? '') === 'Pending' ? 'pending' : ((($case['case_status'] ?? '') === 'Resolved') ? 'resolved' : 'progress');
                 $displayCaseId = gabaybatas_format_case_id($case['display_case_id'] ?? '', $caseIdParam);
                 $dateRaw = (string)($case['case_date'] ?? '');
                 $dateTs = strtotime($dateRaw);
@@ -151,7 +189,7 @@ if ($caseIdParam === '') {
                     <div class="vc-item">
                         <label>Status</label>
                         <div class="vc-value">
-                            <span class="vc-badge <?= $statusClass ?>"><?= htmlspecialchars($status) ?></span>
+                            <span class="vc-badge" style="background:<?= $statusColor ?>18; color:<?= $statusColor ?>; border:1px solid <?= $statusColor ?>35;"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:<?= $statusColor ?>;margin-right:5px;"></span><?= htmlspecialchars($status) ?></span>
                         </div>
                     </div>
                     <div class="vc-item vc-item-full">
@@ -161,6 +199,43 @@ if ($caseIdParam === '') {
                     <div class="vc-item vc-item-full">
                         <label>Description</label>
                         <div class="vc-value vc-multiline"><?= nl2br(htmlspecialchars((string)($case['case_description'] ?? 'No description available.'))) ?></div>
+                    </div>
+
+                    <div class="vc-item vc-item-full">
+                        <div class="vc-evidence-header">
+                            <div>
+                                <label style="margin-bottom:2px;">Submitted Evidence</label>
+                                <p style="font-size:12px;color:#64748b;margin:0;">Files, photos, or video recordings uploaded with this complaint</p>
+                            </div>
+                            <span class="vc-evidence-badge"><i class="uil uil-paperclip"></i> <?= count($evidence) ?> file<?= count($evidence) === 1 ? '' : 's' ?></span>
+                        </div>
+                        <?php if (empty($evidence)): ?>
+                            <div class="vc-evidence-empty">
+                                <i class="uil uil-file-slash"></i>
+                                <span>No evidence uploaded for this case.</span>
+                            </div>
+                        <?php else: ?>
+                            <div class="vc-evidence-grid">
+                                <?php foreach ($evidence as $item): ?>
+                                    <?php
+                                    $isVideo = strtolower((string)$item['evidence_type']) === 'video';
+                                    $sizeMb = number_format(((int)$item['file_size']) / (1024 * 1024), 2);
+                                    ?>
+                                    <div class="vc-evidence-card">
+                                        <div class="vc-evidence-icon <?= $isVideo ? 'is-video' : 'is-image' ?>">
+                                            <i class="uil <?= $isVideo ? 'uil-video' : 'uil-image' ?>"></i>
+                                        </div>
+                                        <div class="vc-evidence-meta">
+                                            <span class="vc-evidence-name" title="<?= htmlspecialchars((string)$item['original_filename']) ?>"><?= htmlspecialchars((string)$item['original_filename']) ?></span>
+                                            <span class="vc-evidence-sub"><?= $isVideo ? 'Video Evidence' : 'Photo Evidence' ?> &bull; <?= $sizeMb ?> MB</span>
+                                        </div>
+                                        <a href="../api/v1/case_evidence.php?id=<?= (int)$item['id'] ?>" target="_blank" rel="noopener" class="vc-evidence-view-btn">
+                                            <i class="uil uil-eye"></i> View
+                                        </a>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>
@@ -189,6 +264,21 @@ if ($caseIdParam === '') {
 .vc-update-btn:hover { background: #d1fae5; }
 
 .vc-card { padding: 20px; }
+.vc-evidence-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.vc-evidence-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: #f1f5f9; color: #475569; }
+.vc-evidence-empty { display: flex; align-items: center; gap: 10px; padding: 16px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; color: #64748b; font-size: 13px; }
+.vc-evidence-empty i { font-size: 20px; color: #94a3b8; }
+.vc-evidence-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin-top: 6px; }
+.vc-evidence-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px; transition: all .2s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+.vc-evidence-card:hover { border-color: #3b82f6; box-shadow: 0 4px 12px rgba(59,130,246,0.1); transform: translateY(-1px); }
+.vc-evidence-icon { width: 40px; height: 40px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 20px; flex-shrink: 0; }
+.vc-evidence-icon.is-image { background: #eff6ff; color: #2563eb; }
+.vc-evidence-icon.is-video { background: #faf5ff; color: #9333ea; }
+.vc-evidence-meta { flex: 1; min-width: 0; }
+.vc-evidence-name { display: block; font-size: 12.5px; font-weight: 600; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vc-evidence-sub { display: block; font-size: 11px; color: #64748b; margin-top: 2px; }
+.vc-evidence-view-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 7px; color: #1e293b; font-size: 12px; font-weight: 600; text-decoration: none; transition: all .15s ease; white-space: nowrap; }
+.vc-evidence-view-btn:hover { background: #2563eb; color: #fff; border-color: #2563eb; }
 .vc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .vc-item label {
     display: block; font-size: 11px; font-weight: 700; letter-spacing: .6px;

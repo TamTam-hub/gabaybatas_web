@@ -2,7 +2,10 @@
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') { header('Location: ../login.php'); exit(); }
 require_once '../config/database.php';
+require_once '../config/kp.php';
 require_once '../config/barangays.php';
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
 
 $caseColumns = [];
 $colResult = $conn->query("SHOW COLUMNS FROM cases");
@@ -15,7 +18,6 @@ $rowIdColumn    = $hasColumn('id') ? 'id' : $idColumn;
 $residentColumn = $hasColumn('resident_name') ? 'resident_name' : ($hasColumn('name') ? 'name' : $idColumn);
 $complainedColumn = $hasColumn('complained_person') ? 'complained_person' : ($hasColumn('respondent_name') ? 'respondent_name' : ($hasColumn('against_person') ? 'against_person' : null));
 $typeColumn     = $hasColumn('case_type') ? 'case_type' : ($hasColumn('type') ? 'type' : null);
-$priorityColumn = $hasColumn('priority') ? 'priority' : null;
 $statusColumn   = $hasColumn('status') ? 'status' : null;
 $barangayColumn = $hasColumn('barangay') ? 'barangay' : null;
 $dateColumn     = $hasColumn('created_at') ? 'created_at' : ($hasColumn('date_submitted') ? 'date_submitted' : ($hasColumn('updated_at') ? 'updated_at' : $idColumn));
@@ -29,24 +31,26 @@ if ($typeColumn) {
     }
 }
 
-$barangayOptions = gabaybatas_get_barangays();
-
-// Counts for filters
-$totalCases    = (int)$conn->query("SELECT COUNT(*) as t FROM cases")->fetch_assoc()['t'];
-$pendingCount  = $statusColumn ? (int)$conn->query("SELECT COUNT(*) as t FROM cases WHERE status='Pending'")->fetch_assoc()['t'] : 0;
-$progressCount = $statusColumn ? (int)$conn->query("SELECT COUNT(*) as t FROM cases WHERE status='In Progress'")->fetch_assoc()['t'] : 0;
-$resolvedCount = $statusColumn ? (int)$conn->query("SELECT COUNT(*) as t FROM cases WHERE status='Resolved'")->fetch_assoc()['t'] : 0;
+// Counts for active records only; archived cases remain available in Records Archive.
+$activeCaseWhere = 'archived_at IS NULL';
+$totalCases    = (int)$conn->query("SELECT COUNT(*) as t FROM cases WHERE $activeCaseWhere")->fetch_assoc()['t'];
+$pendingCount  = $statusColumn ? (int)$conn->query("SELECT COUNT(*) as t FROM cases WHERE $activeCaseWhere AND LOWER(status)='pending'")->fetch_assoc()['t'] : 0;
+$progressCount = $statusColumn ? (int)$conn->query("SELECT COUNT(*) as t FROM cases WHERE $activeCaseWhere AND LOWER(status)='in progress'")->fetch_assoc()['t'] : 0;
+$resolvedCount = $statusColumn ? (int)$conn->query("SELECT COUNT(*) as t FROM cases WHERE $activeCaseWhere AND LOWER(status)='resolved'")->fetch_assoc()['t'] : 0;
 
 $search       = trim($_GET['search'] ?? '');
 $filterStatus = trim((string)($_GET['status'] ?? ''));
 $filterType   = trim((string)($_GET['type'] ?? ''));
-$filterPrio   = trim((string)($_GET['priority'] ?? ''));
-$filterBrgy   = trim((string)($_GET['barangay'] ?? ''));
 $sort         = trim((string)($_GET['sort'] ?? 'newest'));
+$allowedStatuses = array_merge(['', 'Pending', 'In Progress', 'Resolved'], array_keys(kp_statuses()));
+$allowedSorts = ['newest', 'oldest', 'resident_asc', 'resident_desc', 'status_asc'];
+if (!in_array($filterStatus, $allowedStatuses, true)) $filterStatus = '';
+if (!in_array($sort, $allowedSorts, true)) $sort = 'newest';
 $pageNo       = max(1, (int)($_GET['page'] ?? 1));
 $perPage      = 12;
 
 $whereParts = [];
+$whereParts[] = 'archived_at IS NULL';
 if ($search !== '') {
     $s = $conn->real_escape_string($search);
     $fields = [$residentColumn, $idColumn];
@@ -62,14 +66,6 @@ if ($filterStatus !== '' && $statusColumn) {
 if ($filterType !== '' && $typeColumn) {
     $ft = $conn->real_escape_string($filterType);
     $whereParts[] = "LOWER($typeColumn) = LOWER('$ft')";
-}
-if ($filterPrio !== '' && $priorityColumn) {
-    $fp = $conn->real_escape_string($filterPrio);
-    $whereParts[] = "LOWER($priorityColumn) = LOWER('$fp')";
-}
-if ($filterBrgy !== '' && $barangayColumn) {
-    $fb = $conn->real_escape_string($filterBrgy);
-    $whereParts[] = "LOWER($barangayColumn) = LOWER('$fb')";
 }
 $where = $whereParts ? 'WHERE ' . implode(' AND ', $whereParts) : '';
 
@@ -89,10 +85,10 @@ $selectBase = "SELECT
     {$residentColumn} AS display_resident_name,
     " . ($complainedColumn ? "{$complainedColumn} AS display_complained_person" : "'' AS display_complained_person") . ",
     " . ($typeColumn     ? "{$typeColumn} AS case_type"       : "'' AS case_type") . ",
-    " . ($priorityColumn ? "{$priorityColumn} AS priority"    : "'' AS priority") . ",
     " . ($statusColumn   ? "{$statusColumn} AS status"        : "'' AS status") . ",
     " . ($barangayColumn ? "{$barangayColumn} AS barangay"    : "'' AS barangay") . ",
-    {$dateColumn} AS display_date
+    {$dateColumn} AS display_date,
+    cases.kp_status AS kp_status
 FROM cases {$where}";
 
 if (isset($_GET['export']) && $_GET['export'] === 'excel') {
@@ -102,7 +98,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
     $rows[] = ['Administrative Case Monitoring and Documentation Summary', '', '', '', '', '', ''];
     $rows[] = ['Generated: ' . date('F d, Y h:i A') . ' | Prepared by: ' . (string)($_SESSION['name'] ?? 'Admin'), '', '', '', '', '', ''];
     $rows[] = ['', '', '', '', '', '', ''];
-    $rows[] = ['Case ID', 'Resident', 'Complained Person', 'Type', 'Priority', 'Status', 'Barangay', 'Date Filed'];
+    $rows[] = ['Case ID', 'Resident', 'Complained Person', 'Type', 'Status', 'Barangay', 'Date Filed'];
 
     $rowCount = 0;
     if ($exp) {
@@ -113,7 +109,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
                 (string)($row['display_resident_name'] ?? '-'),
                 (string)($row['display_complained_person'] ?? '-'),
                 (string)($row['case_type'] ?? '-'),
-                (string)($row['priority'] ?? '-'),
                 (string)($row['status'] ?? '-'),
                 (string)($row['barangay'] ?? '-'),
                 (string)($row['display_date'] ?? '-'),
@@ -254,7 +249,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
     fputcsv($out, ['Administrative Case Monitoring and Documentation Summary']);
     fputcsv($out, ['Generated: ' . date('F d, Y h:i A') . ' | Prepared by: ' . (string)($_SESSION['name'] ?? 'Admin')]);
     fputcsv($out, []);
-    fputcsv($out, ['Case ID', 'Resident', 'Complained Person', 'Type', 'Priority', 'Status', 'Barangay', 'Date Filed']);
+    fputcsv($out, ['Case ID', 'Resident', 'Complained Person', 'Type', 'Status', 'Barangay', 'Date Filed']);
     if ($exp) {
         $exp->data_seek(0);
         while ($row = $exp->fetch_assoc()) {
@@ -263,7 +258,6 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
                 (string)($row['display_resident_name'] ?? '-'),
                 (string)($row['display_complained_person'] ?? '-'),
                 (string)($row['case_type'] ?? '-'),
-                (string)($row['priority'] ?? '-'),
                 (string)($row['status'] ?? '-'),
                 (string)($row['barangay'] ?? '-'),
                 (string)($row['display_date'] ?? '-'),
@@ -289,8 +283,6 @@ $queryBase = [
     'search' => $search,
     'status' => $filterStatus,
     'type' => $filterType,
-    'priority' => $filterPrio,
-    'barangay' => $filterBrgy,
     'sort' => $sort,
 ];
 
@@ -342,15 +334,13 @@ $buildQuery = static function (array $base, array $override = []): string {
             <form method="GET" class="ac-search-form" id="acSearchForm">
                 <input type="hidden" name="status" value="<?= htmlspecialchars($filterStatus) ?>">
                 <input type="hidden" name="type" value="<?= htmlspecialchars($filterType) ?>">
-                <input type="hidden" name="priority" value="<?= htmlspecialchars($filterPrio) ?>">
-                <input type="hidden" name="barangay" value="<?= htmlspecialchars($filterBrgy) ?>">
                 <input type="hidden" name="sort" value="<?= htmlspecialchars($sort) ?>">
                 <i class="uil uil-search ac-search-icon"></i>
                 <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="Search cases..." class="ac-search-input">
             </form>
             <form method="GET" class="ac-toolbar-right ac-filter-form">
                 <input type="hidden" name="search" value="<?= htmlspecialchars($search) ?>">
-                <input type="hidden" name="status" value="<?= htmlspecialchars($filterStatus) ?>">
+                <input type="hidden" name="sort" value="<?= htmlspecialchars($sort) ?>">
 
                 <?php if ($typeColumn): ?>
                 <select name="type" class="ac-select" onchange="this.form.submit()">
@@ -361,24 +351,48 @@ $buildQuery = static function (array $base, array $override = []): string {
                 </select>
                 <?php endif; ?>
 
-                <?php if ($priorityColumn): ?>
-                <select name="priority" class="ac-select" onchange="this.form.submit()">
-                    <option value="">All Priorities</option>
-                    <option value="High" <?= strtolower($filterPrio)==='high'?'selected':'' ?>>High</option>
-                    <option value="Medium" <?= strtolower($filterPrio)==='medium'?'selected':'' ?>>Medium</option>
-                    <option value="Low" <?= strtolower($filterPrio)==='low'?'selected':'' ?>>Low</option>
+                <?php if ($statusColumn): ?>
+                <select name="status" class="ac-select" onchange="this.form.submit()">
+                    <option value="">All Statuses</option>
+                    <optgroup label="General Status">
+                        <option value="Pending" <?= $filterStatus === 'Pending' ? 'selected' : '' ?>>All Pending</option>
+                        <option value="In Progress" <?= $filterStatus === 'In Progress' ? 'selected' : '' ?>>All In Progress</option>
+                        <option value="Resolved" <?= $filterStatus === 'Resolved' ? 'selected' : '' ?>>All Resolved</option>
+                    </optgroup>
+                    <optgroup label="Intake & Review">
+                        <option value="filed" <?= $filterStatus === 'filed' ? 'selected' : '' ?>>Filed</option>
+                        <option value="under_review" <?= $filterStatus === 'under_review' ? 'selected' : '' ?>>Under Review</option>
+                        <option value="additional_info_required" <?= $filterStatus === 'additional_info_required' ? 'selected' : '' ?>>Additional Info Required</option>
+                        <option value="accepted" <?= $filterStatus === 'accepted' ? 'selected' : '' ?>>Accepted for KP</option>
+                        <option value="not_eligible" <?= $filterStatus === 'not_eligible' ? 'selected' : '' ?>>Not Eligible for KP</option>
+                    </optgroup>
+                    <optgroup label="Mediation & Conciliation">
+                        <option value="mediation_scheduled" <?= $filterStatus === 'mediation_scheduled' ? 'selected' : '' ?>>Mediation Scheduled</option>
+                        <option value="mediation_ongoing" <?= $filterStatus === 'mediation_ongoing' ? 'selected' : '' ?>>Mediation Ongoing</option>
+                        <option value="mediation_settled" <?= $filterStatus === 'mediation_settled' ? 'selected' : '' ?>>Settled in Mediation</option>
+                        <option value="pangkat_constitution" <?= $filterStatus === 'pangkat_constitution' ? 'selected' : '' ?>>Pangkat Constitution</option>
+                        <option value="conciliation_scheduled" <?= $filterStatus === 'conciliation_scheduled' ? 'selected' : '' ?>>Conciliation Scheduled</option>
+                        <option value="conciliation_ongoing" <?= $filterStatus === 'conciliation_ongoing' ? 'selected' : '' ?>>Conciliation Ongoing</option>
+                        <option value="conciliation_settled" <?= $filterStatus === 'conciliation_settled' ? 'selected' : '' ?>>Settled in Conciliation</option>
+                        <option value="mediation_noshow_complainant" <?= $filterStatus === 'mediation_noshow_complainant' ? 'selected' : '' ?>>Complainant Absent (Mediation)</option>
+                        <option value="conciliation_noshow_complainant" <?= $filterStatus === 'conciliation_noshow_complainant' ? 'selected' : '' ?>>Complainant Absent (Conciliation)</option>
+                        <option value="conciliation_noshow_respondent" <?= $filterStatus === 'conciliation_noshow_respondent' ? 'selected' : '' ?>>Respondent Absent (Conciliation)</option>
+                    </optgroup>
+                    <optgroup label="Settlement & Disposition">
+                        <option value="arbitration_agreed" <?= $filterStatus === 'arbitration_agreed' ? 'selected' : '' ?>>Arbitration Agreed</option>
+                        <option value="arbitration_hearing" <?= $filterStatus === 'arbitration_hearing' ? 'selected' : '' ?>>Arbitration Hearing</option>
+                        <option value="arbitration_awarded" <?= $filterStatus === 'arbitration_awarded' ? 'selected' : '' ?>>Arbitration Award Issued</option>
+                        <option value="settlement_repudiation" <?= $filterStatus === 'settlement_repudiation' ? 'selected' : '' ?>>Repudiation Window</option>
+                        <option value="settlement_final" <?= $filterStatus === 'settlement_final' ? 'selected' : '' ?>>Settlement Final & Executory</option>
+                        <option value="compliance_monitoring" <?= $filterStatus === 'compliance_monitoring' ? 'selected' : '' ?>>Compliance Monitoring</option>
+                        <option value="execution_pending" <?= $filterStatus === 'execution_pending' ? 'selected' : '' ?>>Execution Pending</option>
+                        <option value="execution_completed" <?= $filterStatus === 'execution_completed' ? 'selected' : '' ?>>Execution Completed</option>
+                        <option value="certified_to_court" <?= $filterStatus === 'certified_to_court' ? 'selected' : '' ?>>Certified to Court</option>
+                        <option value="dismissed" <?= $filterStatus === 'dismissed' ? 'selected' : '' ?>>Dismissed</option>
+                        <option value="closed" <?= $filterStatus === 'closed' ? 'selected' : '' ?>>Closed</option>
+                    </optgroup>
                 </select>
                 <?php endif; ?>
-
-                <?php if ($barangayColumn): ?>
-                <select name="barangay" class="ac-select" onchange="this.form.submit()">
-                    <option value="">All Barangays</option>
-                    <?php foreach ($barangayOptions as $opt): ?>
-                    <option value="<?= htmlspecialchars($opt) ?>" <?= $filterBrgy === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
-                    <?php endforeach; ?>
-                </select>
-                <?php endif; ?>
-
                 <select name="sort" class="ac-select" onchange="this.form.submit()">
                     <option value="newest" <?= $sort==='newest'?'selected':'' ?>>Newest</option>
                     <option value="oldest" <?= $sort==='oldest'?'selected':'' ?>>Oldest</option>
@@ -391,10 +405,10 @@ $buildQuery = static function (array $base, array $override = []): string {
             </form>
         </div>
 
-        <?php if (isset($_GET['deleted']) && $_GET['deleted'] === '1'): ?>
+        <?php if (isset($_GET['archived']) && $_GET['archived'] === '1'): ?>
         <script>
         if (window.AdminToast) {
-            window.AdminToast.show('success', 'Case Deleted', 'The case record was removed successfully.');
+            window.AdminToast.show('success', 'Case Archived', 'The case was removed from active records and preserved in the archive.');
         }
         </script>
         <?php endif; ?>
@@ -403,16 +417,17 @@ $buildQuery = static function (array $base, array $override = []): string {
         <div class="ac-table-wrap">
             <table class="ac-table">
                 <thead>
-                    <tr><th>Case ID</th><th>Resident</th><th>Complained Person</th><th>Type</th><th>Priority</th><th>Status</th><th>Barangay</th><th>Date & Time</th><th>Action</th></tr>
+                    <tr><th>Case ID</th><th>Resident</th><th>Complained Person</th><th>Type</th><th>Status</th><th>Barangay</th><th>Date & Time</th><th>Action</th></tr>
                 </thead>
                 <tbody>
                 <?php if ($cases && $cases->num_rows > 0): ?>
                 <?php while ($row = $cases->fetch_assoc()):
                     $statusValue   = trim((string)($row['status']   ?? ''));
-                    $priorityValue = trim((string)($row['priority'] ?? ''));
                     $sc = $statusValue==='Pending'?'pending':($statusValue==='Resolved'?'resolved':'progress');
-                    $pc = strtolower($priorityValue)==='high'?'high':(strtolower($priorityValue)==='low'?'low':'med');
                     $caseIdRaw = trim((string)($row['display_case_id'] ?? ''));
+                    if ($caseIdRaw === '') {
+                        $caseIdRaw = trim((string)($row['row_id'] ?? ''));
+                    }
                     $caseIdDigits = preg_replace('/\D+/', '', $caseIdRaw);
                     $caseIdDisplay = $caseIdDigits !== '' ? str_pad(substr($caseIdDigits, -4), 4, '0', STR_PAD_LEFT) : '-';
                     $resName = (string)($row['display_resident_name'] ?? '-');
@@ -432,13 +447,22 @@ $buildQuery = static function (array $base, array $override = []): string {
                     <td class="ac-muted"><?= htmlspecialchars((string)($row['display_complained_person'] ?? 'N/A')) ?></td>
                     <td class="ac-muted"><?= htmlspecialchars((string)($row['case_type']??'N/A')) ?></td>
                     <td>
-                        <?php if($priorityValue!==''): ?>
-                        <span class="ac-priority <?= $pc ?>"><?= htmlspecialchars($priorityValue) ?></span>
-                        <?php else: ?><span class="ac-nil">—</span><?php endif; ?>
-                    </td>
-                    <td>
-                        <?php if($statusValue!==''): ?>
-                        <span class="ac-badge <?= $sc ?>"><span class="ac-bdot"></span><?= htmlspecialchars($statusValue) ?></span>
+                        <?php
+                        $kpStKey = trim((string)($row['kp_status'] ?? ''));
+                        if ($kpStKey === '' || !array_key_exists($kpStKey, kp_statuses())) {
+                            $kpStKey = strtolower(str_replace(' ', '_', $statusValue));
+                        }
+                        $badgeLabel = kp_status_label($kpStKey);
+                        if ($badgeLabel === 'Unknown' || $badgeLabel === '') {
+                            $badgeLabel = $statusValue !== '' ? $statusValue : 'Pending';
+                        }
+                        $badgeColor = kp_status_color($kpStKey);
+                        ?>
+                        <?php if($statusValue!=='' || $kpStKey!==''): ?>
+                        <span class="ac-badge" style="background:<?= htmlspecialchars($badgeColor) ?>18;color:<?= htmlspecialchars($badgeColor) ?>;border:1px solid <?= htmlspecialchars($badgeColor) ?>44;font-weight:600;padding:4px 10px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;font-size:12px;">
+                            <span class="ac-bdot" style="background:<?= htmlspecialchars($badgeColor) ?>;width:6px;height:6px;border-radius:50%;display:inline-block;"></span>
+                            <?= htmlspecialchars($badgeLabel) ?>
+                        </span>
                         <?php else: ?><span class="ac-nil">—</span><?php endif; ?>
                     </td>
                     <td class="ac-muted"><?= htmlspecialchars((string)($row['barangay']??'N/A')) ?></td>
@@ -456,7 +480,7 @@ $buildQuery = static function (array $base, array $override = []): string {
                                     <i class="uil uil-eye"></i> View
                                 </a>
                                 <a href="delete_case.php?id=<?= urlencode((string)($row['row_id']??'')) ?>" class="ac-dropdown-item ac-delete">
-                                    <i class="uil uil-trash-alt"></i> Delete
+                                    <i class="uil uil-archive"></i> Archive
                                 </a>
                             </div>
                         </div>
@@ -540,17 +564,16 @@ document.querySelectorAll('.fade-up').forEach(el=>fo.observe(el));
 
 /* Table */
 .ac-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-.ac-table{width:100%;border-collapse:collapse;font-size:13px;min-width:1000px;}
+.ac-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:13px;min-width:0;}
 .ac-table th{padding:16px 18px;text-align:left;font-size:12px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-sub);font-weight:700;background:#fafbff;border-bottom:2px solid #e5e7eb;white-space:nowrap;}
-.ac-table th:nth-child(1){width:80px;text-align:center;}
-.ac-table th:nth-child(2){width:150px;}
-.ac-table th:nth-child(3){width:140px;}
-.ac-table th:nth-child(4){width:120px;}
-.ac-table th:nth-child(5){width:100px;text-align:center;}
-.ac-table th:nth-child(6){width:110px;text-align:center;}
-.ac-table th:nth-child(7){width:130px;}
-.ac-table th:nth-child(8){width:140px;}
-.ac-table th:nth-child(9){width:60px;text-align:center;}
+.ac-table th:nth-child(1){width:9%;text-align:center;}
+.ac-table th:nth-child(2){width:15%;}
+.ac-table th:nth-child(3){width:16%;}
+.ac-table th:nth-child(4){width:15%;}
+.ac-table th:nth-child(5){width:12%;text-align:center;}
+.ac-table th:nth-child(6){width:14%;}
+.ac-table th:nth-child(7){width:13%;}
+.ac-table th:nth-child(8){width:6%;text-align:center;}
 .ac-table td{padding:16px 18px;border-bottom:1px solid #f3f4f6;vertical-align:middle;text-align:left;}
 .ac-table td:nth-child(1){text-align:center;}
 .ac-table td:nth-child(5){text-align:center;}
@@ -573,10 +596,6 @@ document.querySelectorAll('.fade-up').forEach(el=>fo.observe(el));
 .ac-badge.resolved{background:#dcfce7;color:#15803d;border:1px solid #86efac;}
 .ac-bdot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0;}
 
-.ac-priority{display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;padding:5px 12px;border-radius:100px;min-width:75px;}
-.ac-priority.high{background:#fff1f2;color:#be123c;border:1px solid #fbcfe8;}
-.ac-priority.med{background:#fffbeb;color:#92400e;border:1px solid #fcd34d;}
-.ac-priority.low{background:#f0fdf4;color:#15803d;border:1px solid #86efac;}
 
 .ac-edit-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:#0f766e;text-decoration:none;padding:6px 13px;border-radius:8px;border:1px solid #99f6e4;background:#ccfbf1;transition:all .2s;white-space:nowrap;margin-bottom:4px;}
 .ac-edit-btn:hover{background:#99f6e4;color:#065f46;}
@@ -614,6 +633,8 @@ document.querySelectorAll('.fade-up').forEach(el=>fo.observe(el));
 }
 @media(max-width:900px){
   .ac-body{padding:16px 20px;}
+  .ac-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+  .ac-tab{justify-content:space-between;padding:10px 12px;min-width:0;}
   .ac-toolbar{flex-direction:column;align-items:flex-start;gap:12px;}
   .ac-search-form{max-width:none;width:100%;}
   .ac-toolbar-right{width:100%;justify-content:flex-start;}
@@ -621,5 +642,10 @@ document.querySelectorAll('.fade-up').forEach(el=>fo.observe(el));
   .ac-table{min-width:800px;font-size:12px;}
   .ac-table th,.ac-table td{padding:12px 14px;}
   .ac-dropdown{right:-10px;}
+}
+@media(max-width:480px){
+  .ac-body{padding:14px 12px 32px;}
+  .ac-tabs{grid-template-columns:1fr;}
+  .ac-tab{width:100%;}
 }
 </style>

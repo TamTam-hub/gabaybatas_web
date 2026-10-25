@@ -1,0 +1,12 @@
+/config/gemini.local.php
+/config/mail.local.php
+
+# Residents' private files (uploads and generated KP forms stay on the server only)
+/storage/case_evidence/
+/storage/kp_documents/
+/storage/kp_uploads/
+/storage/residency_documents/
+
+# Reference files with real names / copyrighted handbooks (kept locally)
+/*WITH NAME*.docx
+/*.pdf

@@ -8,7 +8,11 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 }
 
 require_once '../config/database.php';
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
 header('Content-Type: application/json; charset=utf-8');
+$activeCaseWhere = 'archived_at IS NULL';
+$activeUserWhere = 'archived_at IS NULL';
 
 $findColumn = static function (array $columns, array $candidates): ?string {
     foreach ($candidates as $candidate) {
@@ -49,34 +53,34 @@ $caseTypeColumn = $findColumn($caseColumns, ['case_type', 'type']);
 $barangayColumn = $findColumn($caseColumns, ['barangay']);
 $userBarangayColumn = $findColumn($userColumns, ['barangay']);
 
-$totalUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users");
+$totalUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere");
 $totalUsers = (int)(($totalUsersRes ? $totalUsersRes->fetch_assoc()['total'] : 0) ?? 0);
 
 $activeUsers = $totalUsers;
 if ($userStatusColumn) {
-    $activeUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE LOWER($userStatusColumn) = 'active'");
+    $activeUsersRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere AND LOWER($userStatusColumn) = 'active'");
     $activeUsers = (int)(($activeUsersRes ? $activeUsersRes->fetch_assoc()['total'] : 0) ?? 0);
 }
 
 $totalBarangays = 0;
 if ($userBarangayColumn) {
-    $barangayRes = $conn->query("SELECT COUNT(DISTINCT $userBarangayColumn) AS total FROM users WHERE $userBarangayColumn IS NOT NULL AND TRIM($userBarangayColumn) <> ''");
+    $barangayRes = $conn->query("SELECT COUNT(DISTINCT $userBarangayColumn) AS total FROM users WHERE $activeUserWhere AND $userBarangayColumn IS NOT NULL AND TRIM($userBarangayColumn) <> ''");
     $totalBarangays = (int)(($barangayRes ? $barangayRes->fetch_assoc()['total'] : 0) ?? 0);
 } elseif ($barangayColumn) {
-    $barangayRes = $conn->query("SELECT COUNT(DISTINCT $barangayColumn) AS total FROM cases WHERE $barangayColumn IS NOT NULL AND TRIM($barangayColumn) <> ''");
+    $barangayRes = $conn->query("SELECT COUNT(DISTINCT $barangayColumn) AS total FROM cases WHERE $activeCaseWhere AND $barangayColumn IS NOT NULL AND TRIM($barangayColumn) <> ''");
     $totalBarangays = (int)(($barangayRes ? $barangayRes->fetch_assoc()['total'] : 0) ?? 0);
 }
 
-$totalCasesRes = $conn->query("SELECT COUNT(*) AS total FROM cases");
+$totalCasesRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere");
 $totalCases = (int)(($totalCasesRes ? $totalCasesRes->fetch_assoc()['total'] : 0) ?? 0);
 
 $pendingCases = 0;
 $progressCases = 0;
 $resolvedCases = 0;
 if ($caseStatusColumn) {
-    $pendingRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($caseStatusColumn) = 'pending'");
-    $progressRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($caseStatusColumn) = 'in progress'");
-    $resolvedRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($caseStatusColumn) = 'resolved'");
+    $pendingRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'pending'");
+    $progressRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'in progress'");
+    $resolvedRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'resolved'");
     $pendingCases = (int)(($pendingRes ? $pendingRes->fetch_assoc()['total'] : 0) ?? 0);
     $progressCases = (int)(($progressRes ? $progressRes->fetch_assoc()['total'] : 0) ?? 0);
     $resolvedCases = (int)(($resolvedRes ? $resolvedRes->fetch_assoc()['total'] : 0) ?? 0);
@@ -84,7 +88,7 @@ if ($caseStatusColumn) {
 
 $avgResolution = 0;
 if ($caseDateColumn && $hasCaseColumn('updated_at') && $caseStatusColumn) {
-    $avgSql = "SELECT AVG(TIMESTAMPDIFF(DAY, $caseDateColumn, updated_at)) AS avg_days FROM cases WHERE LOWER($caseStatusColumn) = 'resolved' AND $caseDateColumn IS NOT NULL AND updated_at IS NOT NULL";
+    $avgSql = "SELECT AVG(TIMESTAMPDIFF(DAY, $caseDateColumn, updated_at)) AS avg_days FROM cases WHERE $activeCaseWhere AND LOWER($caseStatusColumn) = 'resolved' AND $caseDateColumn IS NOT NULL AND updated_at IS NOT NULL";
     $avgResult = $conn->query($avgSql);
     $avgResolution = (int)round((float)(($avgResult ? $avgResult->fetch_assoc()['avg_days'] : 0) ?? 0));
 }
@@ -97,10 +101,10 @@ $resolutionRate = $totalCases > 0 ? (int)round(($resolvedCases / $totalCases) * 
 $casesThisMonth = 0;
 $casesLastMonth = 0;
 if ($caseDateColumn) {
-    $casesThisMonthRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE MONTH($caseDateColumn) = MONTH(CURRENT_DATE()) AND YEAR($caseDateColumn) = YEAR(CURRENT_DATE())");
+    $casesThisMonthRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND MONTH($caseDateColumn) = MONTH(CURRENT_DATE()) AND YEAR($caseDateColumn) = YEAR(CURRENT_DATE())");
     $casesThisMonth = (int)(($casesThisMonthRes ? $casesThisMonthRes->fetch_assoc()['total'] : 0) ?? 0);
 
-    $lastMonthRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE MONTH($caseDateColumn) = MONTH(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH)) AND YEAR($caseDateColumn) = YEAR(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH))");
+    $lastMonthRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND MONTH($caseDateColumn) = MONTH(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH)) AND YEAR($caseDateColumn) = YEAR(DATE_SUB(CURRENT_DATE(), INTERVAL 1 MONTH))");
     $casesLastMonth = (int)(($lastMonthRes ? $lastMonthRes->fetch_assoc()['total'] : 0) ?? 0);
 }
 
@@ -117,7 +121,7 @@ $progressData = [];
 $resolvedData = [];
 if ($caseDateColumn && $caseStatusColumn) {
     $monthMap = [];
-    $monthRows = $conn->query("SELECT DATE_FORMAT($caseDateColumn, '%Y-%m') AS month_key, LOWER($caseStatusColumn) AS status_key, COUNT(*) AS total FROM cases WHERE $caseDateColumn IS NOT NULL AND $caseStatusColumn IS NOT NULL GROUP BY month_key, status_key");
+    $monthRows = $conn->query("SELECT DATE_FORMAT($caseDateColumn, '%Y-%m') AS month_key, LOWER($caseStatusColumn) AS status_key, COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $caseDateColumn IS NOT NULL AND $caseStatusColumn IS NOT NULL GROUP BY month_key, status_key");
     if ($monthRows) {
         while ($row = $monthRows->fetch_assoc()) {
             $monthKey = (string)($row['month_key'] ?? '');
@@ -153,7 +157,7 @@ if ($caseDateColumn && $caseStatusColumn) {
 $typeLabels = ['No Data'];
 $typeValues = [0];
 if ($caseTypeColumn) {
-    $typeResult = $conn->query("SELECT $caseTypeColumn AS type_name, COUNT(*) AS total FROM cases WHERE $caseTypeColumn IS NOT NULL AND TRIM($caseTypeColumn) <> '' GROUP BY $caseTypeColumn ORDER BY total DESC LIMIT 5");
+    $typeResult = $conn->query("SELECT $caseTypeColumn AS type_name, COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $caseTypeColumn IS NOT NULL AND TRIM($caseTypeColumn) <> '' GROUP BY $caseTypeColumn ORDER BY total DESC LIMIT 5");
     if ($typeResult && $typeResult->num_rows > 0) {
         $typeLabels = [];
         $typeValues = [];
@@ -167,7 +171,7 @@ if ($caseTypeColumn) {
 $barangayLabels = ['No Data'];
 $barangayValues = [0];
 if ($barangayColumn) {
-    $bResult = $conn->query("SELECT $barangayColumn AS name, COUNT(*) AS total FROM cases WHERE $barangayColumn IS NOT NULL AND TRIM($barangayColumn) <> '' GROUP BY $barangayColumn ORDER BY total DESC LIMIT 5");
+    $bResult = $conn->query("SELECT $barangayColumn AS name, COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $barangayColumn IS NOT NULL AND TRIM($barangayColumn) <> '' GROUP BY $barangayColumn ORDER BY total DESC LIMIT 5");
     if ($bResult && $bResult->num_rows > 0) {
         $barangayLabels = [];
         $barangayValues = [];
@@ -177,7 +181,7 @@ if ($barangayColumn) {
         }
     }
 } elseif ($userBarangayColumn) {
-    $bResult = $conn->query("SELECT $userBarangayColumn AS name, COUNT(*) AS total FROM users WHERE $userBarangayColumn IS NOT NULL AND TRIM($userBarangayColumn) <> '' GROUP BY $userBarangayColumn ORDER BY total DESC LIMIT 5");
+    $bResult = $conn->query("SELECT $userBarangayColumn AS name, COUNT(*) AS total FROM users WHERE $activeUserWhere AND $userBarangayColumn IS NOT NULL AND TRIM($userBarangayColumn) <> '' GROUP BY $userBarangayColumn ORDER BY total DESC LIMIT 5");
     if ($bResult && $bResult->num_rows > 0) {
         $barangayLabels = [];
         $barangayValues = [];
@@ -190,10 +194,10 @@ if ($barangayColumn) {
 
 $dailyLogins = 0;
 if ($userLoginColumn) {
-    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE DATE($userLoginColumn) = CURRENT_DATE()");
+    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere AND DATE($userLoginColumn) = CURRENT_DATE()");
     $dailyLogins = (int)(($loginRes ? $loginRes->fetch_assoc()['total'] : 0) ?? 0);
 } elseif ($userUpdatedColumn) {
-    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE DATE($userUpdatedColumn) = CURRENT_DATE()");
+    $loginRes = $conn->query("SELECT COUNT(*) AS total FROM users WHERE $activeUserWhere AND DATE($userUpdatedColumn) = CURRENT_DATE()");
     $dailyLogins = (int)(($loginRes ? $loginRes->fetch_assoc()['total'] : 0) ?? 0);
 }
 if ($dailyLogins <= 0) {
@@ -202,10 +206,10 @@ if ($dailyLogins <= 0) {
 
 $caseUpdates = 0;
 if ($hasCaseColumn('updated_at')) {
-    $updatesRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE DATE(updated_at) = CURRENT_DATE()");
+    $updatesRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND DATE(updated_at) = CURRENT_DATE()");
     $caseUpdates = (int)(($updatesRes ? $updatesRes->fetch_assoc()['total'] : 0) ?? 0);
 } elseif ($caseDateColumn) {
-    $updatesRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE DATE($caseDateColumn) = CURRENT_DATE()");
+    $updatesRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND DATE($caseDateColumn) = CURRENT_DATE()");
     $caseUpdates = (int)(($updatesRes ? $updatesRes->fetch_assoc()['total'] : 0) ?? 0);
 }
 if ($caseUpdates <= 0) {
@@ -221,7 +225,7 @@ $recentFields[] = ($caseStatusColumn ? "$caseStatusColumn AS status" : "'' AS st
 $recentFields[] = ($barangayColumn ? "$barangayColumn AS display_barangay" : "'' AS display_barangay");
 $recentFields[] = ($caseDateColumn ? "$caseDateColumn AS display_date" : "NULL AS display_date");
 $recentOrderColumn = $caseDateColumn ?: ($hasCaseColumn('id') ? 'id' : 'case_id');
-$recentSql = 'SELECT ' . implode(', ', $recentFields) . " FROM cases ORDER BY $recentOrderColumn DESC LIMIT 5";
+$recentSql = 'SELECT ' . implode(', ', $recentFields) . " FROM cases WHERE $activeCaseWhere ORDER BY $recentOrderColumn DESC LIMIT 5";
 $recent = $conn->query($recentSql);
 
 $recentRows = [];

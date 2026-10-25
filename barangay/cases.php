@@ -9,6 +9,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'barangay') {
 }
 
 require_once '../config/database.php';
+require_once '../config/kp.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
 gabaybatas_block_barangay_delete_requests();
 
@@ -22,11 +23,18 @@ $filter_raw = isset($_GET['status']) ? trim($_GET['status']) : '';
 $search = $conn->real_escape_string($search_raw);
 $searchCaseIdRaw = preg_replace('/^\s*C\s*-\s*/i', '', $search_raw);
 $searchCaseId = ctype_digit((string)$searchCaseIdRaw) ? $conn->real_escape_string($searchCaseIdRaw) : '';
-$allowed_statuses = ['Pending', 'In Progress', 'Resolved'];
+$hasKpStatus = gabaybatas_table_has_column($conn, 'cases', 'kp_status');
+$hasArchivedAt = gabaybatas_table_has_column($conn, 'cases', 'archived_at');
+$general_statuses = ['Pending', 'In Progress', 'Resolved'];
+$kp_status_map = function_exists('kp_statuses') ? kp_statuses() : [];
+$allowed_statuses = array_merge($general_statuses, array_keys($kp_status_map));
 $filter = in_array($filter_raw, $allowed_statuses, true) ? $conn->real_escape_string($filter_raw) : '';
 $showUpdatedToast = isset($_GET['updated']) && $_GET['updated'] === '1';
 
-$query = "SELECT id, {$caseIdDisplayColumn} AS display_case_id, name, complained_person, case_type, status, date_submitted" . ($hasCaseBarangay ? ", barangay" : "") . " FROM cases WHERE 1";
+$query = "SELECT id, {$caseIdDisplayColumn} AS display_case_id, name, complained_person, case_type, status" . ($hasKpStatus ? ", kp_status" : "") . ($hasCaseBarangay ? ", barangay" : "") . ", date_submitted FROM cases WHERE 1";
+if ($hasArchivedAt) {
+    $query .= " AND archived_at IS NULL";
+}
 if ($hasCaseBarangay && $currentBarangay !== '') {
     $query .= " AND LOWER(barangay) = LOWER('" . $conn->real_escape_string($currentBarangay) . "')";
 }
@@ -38,7 +46,11 @@ if ($search_raw !== '') {
     $query .= ")";
 }
 if ($filter !== '') {
-    $query .= " AND status='{$filter}'";
+    if (in_array($filter, $general_statuses, true)) {
+        $query .= " AND status='{$filter}'";
+    } else {
+        $query .= " AND kp_status='{$filter}'";
+    }
 }
 $query .= " ORDER BY date_submitted DESC";
 
@@ -80,9 +92,40 @@ $result = $conn->query($query);
                         <i class="input-icon uil uil-clock"></i>
                         <select name="status" class="filter-input filter-select">
                             <option value="">All Statuses</option>
-                            <option value="Pending" <?= ($filter_raw === 'Pending') ? 'selected' : '' ?>>Pending</option>
-                            <option value="In Progress" <?= ($filter_raw === 'In Progress') ? 'selected' : '' ?>>In Progress</option>
-                            <option value="Resolved" <?= ($filter_raw === 'Resolved') ? 'selected' : '' ?>>Resolved</option>
+                            <optgroup label="General Status">
+                                <option value="Pending" <?= ($filter_raw === 'Pending') ? 'selected' : '' ?>>All Pending</option>
+                                <option value="In Progress" <?= ($filter_raw === 'In Progress') ? 'selected' : '' ?>>All In Progress</option>
+                                <option value="Resolved" <?= ($filter_raw === 'Resolved') ? 'selected' : '' ?>>All Resolved</option>
+                            </optgroup>
+                            <optgroup label="Intake & Review">
+                                <option value="filed" <?= ($filter_raw === 'filed') ? 'selected' : '' ?>>Filed</option>
+                                <option value="under_review" <?= ($filter_raw === 'under_review') ? 'selected' : '' ?>>Under Review</option>
+                                <option value="additional_info_required" <?= ($filter_raw === 'additional_info_required') ? 'selected' : '' ?>>Additional Info Required</option>
+                                <option value="accepted" <?= ($filter_raw === 'accepted') ? 'selected' : '' ?>>Accepted for KP</option>
+                                <option value="not_eligible" <?= ($filter_raw === 'not_eligible') ? 'selected' : '' ?>>Not Eligible for KP</option>
+                            </optgroup>
+                            <optgroup label="Mediation & Conciliation">
+                                <option value="mediation_scheduled" <?= ($filter_raw === 'mediation_scheduled') ? 'selected' : '' ?>>Mediation Scheduled</option>
+                                <option value="mediation_ongoing" <?= ($filter_raw === 'mediation_ongoing') ? 'selected' : '' ?>>Mediation Ongoing</option>
+                                <option value="mediation_settled" <?= ($filter_raw === 'mediation_settled') ? 'selected' : '' ?>>Settled in Mediation</option>
+                                <option value="pangkat_constitution" <?= ($filter_raw === 'pangkat_constitution') ? 'selected' : '' ?>>Pangkat Constitution</option>
+                                <option value="conciliation_scheduled" <?= ($filter_raw === 'conciliation_scheduled') ? 'selected' : '' ?>>Conciliation Scheduled</option>
+                                <option value="conciliation_ongoing" <?= ($filter_raw === 'conciliation_ongoing') ? 'selected' : '' ?>>Conciliation Ongoing</option>
+                                <option value="conciliation_settled" <?= ($filter_raw === 'conciliation_settled') ? 'selected' : '' ?>>Settled in Conciliation</option>
+                                <option value="mediation_noshow_complainant" <?= ($filter_raw === 'mediation_noshow_complainant') ? 'selected' : '' ?>>Complainant Absent (Mediation)</option>
+                                <option value="conciliation_noshow_complainant" <?= ($filter_raw === 'conciliation_noshow_complainant') ? 'selected' : '' ?>>Complainant Absent (Conciliation)</option>
+                                <option value="conciliation_noshow_respondent" <?= ($filter_raw === 'conciliation_noshow_respondent') ? 'selected' : '' ?>>Respondent Absent (Conciliation)</option>
+                            </optgroup>
+                            <optgroup label="Settlement & Disposition">
+                                <option value="settlement_repudiation" <?= ($filter_raw === 'settlement_repudiation') ? 'selected' : '' ?>>Repudiation Window</option>
+                                <option value="settlement_final" <?= ($filter_raw === 'settlement_final') ? 'selected' : '' ?>>Settlement Final & Executory</option>
+                                <option value="compliance_monitoring" <?= ($filter_raw === 'compliance_monitoring') ? 'selected' : '' ?>>Compliance Monitoring</option>
+                                <option value="execution_pending" <?= ($filter_raw === 'execution_pending') ? 'selected' : '' ?>>Execution Pending</option>
+                                <option value="execution_completed" <?= ($filter_raw === 'execution_completed') ? 'selected' : '' ?>>Execution Completed</option>
+                                <option value="certified_to_court" <?= ($filter_raw === 'certified_to_court') ? 'selected' : '' ?>>Certified to Court</option>
+                                <option value="dismissed" <?= ($filter_raw === 'dismissed') ? 'selected' : '' ?>>Dismissed</option>
+                                <option value="closed" <?= ($filter_raw === 'closed') ? 'selected' : '' ?>>Closed</option>
+                            </optgroup>
                         </select>
                     </div>
                 </div>
@@ -130,7 +173,13 @@ $result = $conn->query($query);
                         <?php if ($result && $result->num_rows > 0): ?>
                             <?php while ($row = $result->fetch_assoc()):
                                 $status = trim((string)($row['status'] ?? 'Pending'));
-                                $statusClass = $status === 'Pending' ? 'pending' : ($status === 'Resolved' ? 'resolved' : 'progress');
+                                $rawKpStatus = trim((string)($row['kp_status'] ?? ''));
+                                $statusLabel = ($rawKpStatus !== '' && function_exists('kp_status_label'))
+                                    ? kp_status_label($rawKpStatus)
+                                    : $status;
+                                $statusColor = ($rawKpStatus !== '' && function_exists('kp_status_color'))
+                                    ? kp_status_color($rawKpStatus)
+                                    : ($status === 'Resolved' ? '#16a34a' : ($status === 'In Progress' ? '#2563eb' : '#f59e0b'));
                                 $rowBarangay = trim((string)($row['barangay'] ?? ''));
                                 $canEditCase = !$hasCaseBarangay || $currentBarangay === '' || $rowBarangay === '' || strcasecmp($rowBarangay, $currentBarangay) === 0;
                                 $dateRaw = (string)($row['date_submitted'] ?? '');
@@ -142,7 +191,7 @@ $result = $conn->query($query);
                                 <td><?= htmlspecialchars((string)($row['name'] ?? 'N/A')) ?></td>
                                 <td><?= htmlspecialchars((string)($row['complained_person'] ?? 'N/A')) ?></td>
                                 <td><?= htmlspecialchars((string)($row['case_type'] ?? 'N/A')) ?></td>
-                                <td><span class="badge-status <?= $statusClass ?>"><?= htmlspecialchars($status) ?></span></td>
+                                <td><span class="badge-status kp-styled" style="background:<?= $statusColor ?>18; color:<?= $statusColor ?>; border:1px solid <?= $statusColor ?>35;"><?= htmlspecialchars($statusLabel) ?></span></td>
                                 <td><?= htmlspecialchars($dateDisplay) ?></td>
                                 <td>
                                     <div class="action-group">
@@ -150,6 +199,7 @@ $result = $conn->query($query);
                                         <?php if ($canEditCase): ?>
                                         <a href="update_case.php?id=<?= (int)($row['id'] ?? 0) ?>" class="table-action"><i class="uil uil-edit"></i> Edit</a>
                                         <?php endif; ?>
+                                        <a href="case_process.php?id=<?= (int)($row['id'] ?? 0) ?>" class="table-action table-action-kp"><i class="uil uil-balance-scale"></i> Process</a>
                                     </div>
                                 </td>
                             </tr>
@@ -202,15 +252,50 @@ $result = $conn->query($query);
 .table-dashboard tbody tr:hover td { background:#f9fbff; }
 .badge-status { display:inline-flex; align-items:center; gap:5px; padding:4px 10px; border-radius:4px; font-size:11.5px; font-weight:600; letter-spacing:.2px; }
 .badge-status::before { content:''; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+.badge-status.kp-styled::before { background: currentColor !important; }
 .pending { background:var(--orange-bg); color:var(--orange); }
 .pending::before { background:var(--orange); }
 .progress { background:var(--blue-soft); color:var(--blue-text); }
 .progress::before { background:var(--navy); }
 .resolved { background:var(--green-bg); color:var(--green); }
 .resolved::before { background:var(--green); }
-.action-group { display:flex; gap:6px; justify-content:center; flex-wrap:wrap; }
-.table-action { display:inline-flex; align-items:center; gap:4px; color:var(--navy); text-decoration:none; font-size:13px; font-weight:600; padding:5px 10px; border:1px solid var(--border); border-radius:5px; }
-.table-action:hover { background:var(--navy-light); border-color:var(--navy); }
+.action-group { display:inline-flex; align-items:center; gap:8px; justify-content:center; white-space:nowrap; }
+.table-action { display:inline-flex; align-items:center; gap:5px; color:var(--navy); background:#ffffff; text-decoration:none; font-size:12.5px; font-weight:600; padding:6px 12px; border:1px solid var(--border); border-radius:7px; transition:all .15s ease; white-space:nowrap; }
+.table-action:hover { background:var(--navy-light); border-color:var(--navy); color:var(--navy); }
+.table-action-kp {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+    color: #ffffff !important;
+    border: 1px solid #1e3a8a;
+    border-radius: 7px;
+    padding: 6px 13px;
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: .25px;
+    text-decoration: none;
+    box-shadow: 0 2px 5px rgba(37, 99, 235, 0.25), 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.table-action-kp i {
+    font-size: 15px;
+    transition: transform 0.2s ease;
+}
+.table-action-kp:hover {
+    background: linear-gradient(135deg, #172554 0%, #1d4ed8 100%);
+    border-color: #172554;
+    color: #ffffff !important;
+    transform: translateY(-1.5px);
+    box-shadow: 0 5px 12px rgba(37, 99, 235, 0.38), 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+.table-action-kp:hover i {
+    transform: rotate(-8deg) scale(1.12);
+}
+.table-action-kp:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+}
 .table-action i { font-size:14px; }
 .empty-state { padding:24px 12px; text-align:center; }
 .empty-title { font-size:14px; font-weight:700; color:var(--text-main); margin-bottom:6px; }

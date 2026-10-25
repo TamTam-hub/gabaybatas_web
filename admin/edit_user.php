@@ -15,6 +15,16 @@ if ($userColResult) {
         $userColumns[] = $col['Field'];
     }
 }
+if (!in_array('status', $userColumns, true)) {
+    $conn->query("ALTER TABLE users ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Active'");
+    $userColResult = $conn->query("SHOW COLUMNS FROM users");
+    $userColumns = [];
+    if ($userColResult) {
+        while ($col = $userColResult->fetch_assoc()) {
+            $userColumns[] = $col['Field'];
+        }
+    }
+}
 
 $hasColumn = static function (string $column) use ($userColumns): bool {
     return in_array($column, $userColumns, true);
@@ -50,9 +60,12 @@ if ($error === '') {
     if ($hasColumn('name'))     { $selectFields[] = 'name'; }
     if ($hasColumn('username')) { $selectFields[] = 'username'; }
     if ($hasColumn('email'))    { $selectFields[] = 'email'; }
+    if ($hasColumn('age'))      { $selectFields[] = 'age'; }
     if ($hasColumn('role'))     { $selectFields[] = 'role'; }
     if ($hasColumn('barangay')) { $selectFields[] = 'barangay'; }
     if ($hasColumn('status'))   { $selectFields[] = 'status'; }
+    if ($hasColumn('created_at')) { $selectFields[] = 'created_at'; }
+    if ($hasColumn('last_login')) { $selectFields[] = 'last_login'; }
 
     if (!$selectFields) {
         $error = 'No editable user fields are available.';
@@ -77,8 +90,9 @@ $form = [
     'name' => '',
     'username' => '',
     'email' => '',
+    'age' => '',
     'role' => 'resident',
-    'barangay' => '',
+    'barangay' => 'Barangay Muñoz',
     'status' => 'Active',
 ];
 
@@ -86,11 +100,12 @@ if ($user) {
     $form['name'] = trim((string)($user['name'] ?? ''));
     $form['username'] = trim((string)($user['username'] ?? ''));
     $form['email'] = trim((string)($user['email'] ?? ''));
+    $form['age'] = trim((string)($user['age'] ?? ''));
     $form['role'] = strtolower(trim((string)($user['role'] ?? 'resident')));
     if ($form['role'] === '') {
         $form['role'] = 'resident';
     }
-    $form['barangay'] = trim((string)($user['barangay'] ?? ''));
+    $form['barangay'] = 'Barangay Muñoz';
     $form['status'] = trim((string)($user['status'] ?? 'Active'));
     
     // Normalize barangay to match valid options (case-insensitive)
@@ -107,12 +122,11 @@ if ($user) {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
     $form['name'] = trim((string)($_POST['name'] ?? ''));
-    $form['username'] = trim((string)($_POST['username'] ?? ''));
     $form['email'] = trim((string)($_POST['email'] ?? ''));
+    $form['age'] = trim((string)($_POST['age'] ?? ''));
     $form['role'] = strtolower(trim((string)($_POST['role'] ?? 'resident')));
-    $form['barangay'] = trim((string)($_POST['barangay'] ?? ''));
+    $form['barangay'] = 'Barangay Muñoz';
     $form['status'] = trim((string)($_POST['status'] ?? 'Active'));
-    $passwordRaw = (string)($_POST['password'] ?? '');
 
     // Normalize barangay to match valid options (case-insensitive)
     if ($form['barangay'] !== '') {
@@ -130,9 +144,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         $form['role'] = 'resident';
     }
 
-    if ($hasColumn('username') && $form['username'] === '') {
-        $error = 'Username is required.';
-    } else {
+    {
         $setParts = [];
         $types = '';
         $values = [];
@@ -141,6 +153,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
             'name' => trim((string)($user['name'] ?? '')),
             'username' => trim((string)($user['username'] ?? '')),
             'email' => trim((string)($user['email'] ?? '')),
+            'age' => trim((string)($user['age'] ?? '')),
             'role' => trim((string)($user['role'] ?? '')),
             'barangay' => trim((string)($user['barangay'] ?? '')),
             'status' => trim((string)($user['status'] ?? '')),
@@ -164,18 +177,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 $values[] = $form['name'];
             }
         }
-        if ($hasColumn('username')) {
-            if ($current['username'] !== $form['username']) {
-                $setParts[] = 'username = ?';
-                $types .= 's';
-                $values[] = $form['username'];
-            }
-        }
         if ($hasColumn('email')) {
             if ($current['email'] !== $form['email']) {
                 $setParts[] = 'email = ?';
                 $types .= 's';
                 $values[] = $form['email'];
+            }
+            if ($hasColumn('age') && $current['age'] !== $form['age']) {
+                $setParts[] = 'age = ?';
+                $types .= 's';
+                $values[] = $form['age'];
             }
         }
         if ($hasColumn('role')) {
@@ -199,12 +210,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 $values[] = $form['status'];
             }
         }
-        if ($hasColumn('password') && $passwordRaw !== '') {
-            $setParts[] = 'password = ?';
-            $types .= 's';
-            $values[] = password_hash($passwordRaw, PASSWORD_DEFAULT);
-        }
-
         if (!$setParts) {
             $success = 'No changes detected.';
             $toastType = 'info';
@@ -291,6 +296,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
         <?php endif; ?>
 
         <?php if ($error === '' || $user !== null): ?>
+        <div class="eu-account-meta">
+            <div><span>Account Created</span><strong><?= !empty($user['created_at']) && strtotime((string)$user['created_at']) ? htmlspecialchars(date('M d, Y h:i A', strtotime((string)$user['created_at']))) : 'N/A' ?></strong></div>
+            <div><span>Last Login</span><strong><?= !empty($user['last_login']) && strtotime((string)$user['last_login']) ? htmlspecialchars(date('M d, Y h:i A', strtotime((string)$user['last_login']))) : 'Never' ?></strong></div>
+        </div>
         <form method="POST" class="eu-form">
             <div class="eu-grid">
 
@@ -300,18 +309,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
                 </div>
 
                 <div class="eu-field">
-                    <label>Username<?= $hasColumn('username') ? ' *' : '' ?></label>
-                    <input type="text" name="username" value="<?= htmlspecialchars($form['username']) ?>" placeholder="Enter username">
-                </div>
-
-                <div class="eu-field">
                     <label>Email</label>
                     <input type="email" name="email" value="<?= htmlspecialchars($form['email']) ?>" placeholder="name@example.com">
                 </div>
 
                 <div class="eu-field">
-                    <label>New Password (optional)</label>
-                    <input type="password" name="password" placeholder="Leave empty to keep current password">
+                    <label>Age</label>
+                    <input type="text" name="age" value="<?= htmlspecialchars($form['age'] ?? '') ?>" placeholder="Enter age">
                 </div>
 
                 <div class="eu-field">
@@ -333,12 +337,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '') {
 
                 <div class="eu-field eu-field-full">
                     <label>Barangay</label>
-                    <select name="barangay">
-                        <option value="">-- Select Barangay --</option>
-                        <?php foreach (gabaybatas_get_barangays() as $brgy): ?>
-                        <option value="<?= htmlspecialchars($brgy) ?>" <?= $form['barangay'] === $brgy ? 'selected' : '' ?>><?= htmlspecialchars($brgy) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <input type="text" value="Barangay Muñoz" readonly>
+                    <input type="hidden" name="barangay" value="Barangay Muñoz">
                 </div>
 
             </div>
@@ -396,6 +396,10 @@ if (window.AdminToast) {
     margin-bottom: 12px;
 }
 .eu-alert.error { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; }
+.eu-account-meta { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:18px; }
+.eu-account-meta > div { background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:11px 13px; }
+.eu-account-meta span { display:block; color:var(--text-sub); font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; margin-bottom:5px; }
+.eu-account-meta strong { color:var(--text-main); font-size:13px; font-weight:600; }
 
 .eu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .eu-field { display: flex; flex-direction: column; gap: 6px; }
@@ -431,5 +435,6 @@ if (window.AdminToast) {
     .eu-body { padding: 16px; }
     .eu-head { flex-direction: column; align-items: flex-start; }
     .eu-grid { grid-template-columns: 1fr; }
+    .eu-account-meta { grid-template-columns: 1fr; }
 }
 </style>

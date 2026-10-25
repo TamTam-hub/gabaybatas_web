@@ -25,7 +25,7 @@ $form = [
     'username' => '',
     'email' => '',
     'role' => 'resident',
-    'barangay' => '',
+    'barangay' => 'Barangay Muñoz',
     'status' => 'Active',
 ];
 
@@ -37,20 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form['username'] = trim((string)($_POST['username'] ?? ''));
     $form['email'] = trim((string)($_POST['email'] ?? ''));
     $form['role'] = strtolower(trim((string)($_POST['role'] ?? 'resident')));
-    $form['barangay'] = trim((string)($_POST['barangay'] ?? ''));
+    $form['barangay'] = 'Barangay Muñoz';
     $form['status'] = trim((string)($_POST['status'] ?? 'Active'));
     $passwordRaw = (string)($_POST['password'] ?? '');
-
-    // Normalize barangay to match valid options (case-insensitive)
-    if ($form['barangay'] !== '') {
-        $validBarangays = gabaybatas_get_barangays();
-        foreach ($validBarangays as $validBrgy) {
-            if (strtolower($form['barangay']) === strtolower($validBrgy)) {
-                $form['barangay'] = $validBrgy;
-                break;
-            }
-        }
-    }
 
     $allowedRoles = ['resident', 'barangay', 'admin'];
     if (!in_array($form['role'], $allowedRoles, true)) {
@@ -126,7 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'username' => '',
                         'email' => '',
                         'role' => 'resident',
-                        'barangay' => '',
+                        'barangay' => 'Barangay Muñoz',
                         'status' => 'Active',
                     ];
                 } else {
@@ -215,12 +204,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 <div class="au-field au-field-full">
                     <label>Barangay</label>
-                    <select name="barangay">
-                        <option value="">-- Select Barangay --</option>
-                        <?php foreach (gabaybatas_get_barangays() as $brgy): ?>
-                        <option value="<?= htmlspecialchars($brgy) ?>" <?= $form['barangay'] === $brgy ? 'selected' : '' ?>><?= htmlspecialchars($brgy) ?></option>
-                        <?php endforeach; ?>
-                    </select>
+                    <input type="text" value="Barangay Muñoz" readonly>
+                    <input type="hidden" name="barangay" value="Barangay Muñoz">
                 </div>
                 </div>
 

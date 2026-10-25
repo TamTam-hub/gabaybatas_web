@@ -6,6 +6,10 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 }
 
 require_once '../config/database.php';
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
 
 $userColumns = [];
 $userColResult = $conn->query("SHOW COLUMNS FROM users");
@@ -23,6 +27,7 @@ $idColumn = $hasColumn('id') ? 'id' : ($userColumns[0] ?? null);
 $userId = trim((string)($_GET['id'] ?? ''));
 $error = '';
 $success = '';
+$reason = trim((string)($_POST['archive_reason'] ?? ''));
 $user = null;
 
 if ($idColumn === null) {
@@ -36,8 +41,8 @@ if ($error === '' && $userId === '') {
 if ($error === '') {
     $selectFields = [];
     if ($hasColumn('name'))     { $selectFields[] = 'name'; }
-    if ($hasColumn('username')) { $selectFields[] = 'username'; }
     if ($hasColumn('email'))    { $selectFields[] = 'email'; }
+    if ($hasColumn('role'))     { $selectFields[] = 'role'; }
 
     if (!$selectFields) {
         $error = 'No readable user fields are available.';
@@ -65,15 +70,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $user !== null) {
     if ($confirmToken !== $expectedToken) {
         $error = 'Invalid confirmation. Please try again.';
     } else {
-        $sql = "DELETE FROM users WHERE $idColumn = ?";
+        if ($reason === '') {
+            $error = 'Please provide a reason for archiving this user.';
+        }
+    }
+
+    if ($error === '') {
+        $sql = "UPDATE users
+            SET archive_previous_status = status, status = 'Archived', archived_at = NOW(), archived_by = ?, archive_reason = ?
+            WHERE $idColumn = ? AND (archived_at IS NULL)";
         $stmt = $conn->prepare($sql);
         if ($stmt) {
-            $stmt->bind_param('s', $userId);
+            $adminId = isset($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
+            $stmt->bind_param('iss', $adminId, $reason, $userId);
             if ($stmt->execute()) {
-                header('Location: manage_users.php?deleted=1');
-                exit();
+                if ($stmt->affected_rows === 1) {
+                    gabaybatas_archive_audit($conn, 'user_archived', 'user', $userId, $reason, $user, [
+                        'status' => 'Archived',
+                        'archived_at' => date('Y-m-d H:i:s'),
+                        'archive_reason' => $reason,
+                    ]);
+                    header('Location: manage_users.php?archived=1');
+                    exit();
+                }
+                $error = 'This user is already archived or could not be updated.';
             } else {
-                $error = 'Unable to delete user. Please try again.';
+                $error = 'Unable to archive user. Please try again.';
             }
             $stmt->close();
         } else {
@@ -109,7 +131,7 @@ $confirmToken = md5($userId . session_id());
 <div class="page-body du-body">
 
     <div class="du-head fade-up" style="--d:0s">
-        <p class="du-sub">Permanently remove a user account from the system.</p>
+        <p class="du-sub">Deactivate a user account while preserving its historical relationships.</p>
         <a href="manage_users.php" class="du-back-btn"><i class="uil uil-arrow-left"></i> Back to Users</a>
     </div>
 
@@ -129,9 +151,9 @@ $confirmToken = md5($userId . session_id());
             <div class="du-warning">
                 <div class="du-warning-icon"><i class="uil uil-exclamation-triangle"></i></div>
                 <div class="du-warning-content">
-                    <div class="du-warning-title">Irreversible Action</div>
+                    <div class="du-warning-title">Confirm user archiving</div>
                     <p class="du-warning-text">
-                        Deleting this user account is permanent and cannot be undone. All associated data will be removed from the system.
+                        This account will no longer be able to log in or appear as an active user. Its historical records will be preserved.
                     </p>
                 </div>
             </div>
@@ -142,20 +164,22 @@ $confirmToken = md5($userId . session_id());
                     <span class="du-value"><?= htmlspecialchars((string)($user['name'] ?? 'N/A')) ?></span>
                 </div>
                 <div class="du-info-item">
-                    <span class="du-label">Username</span>
-                    <span class="du-value"><?= htmlspecialchars((string)($user['username'] ?? 'N/A')) ?></span>
-                </div>
-                <div class="du-info-item">
                     <span class="du-label">Email</span>
                     <span class="du-value"><?= htmlspecialchars((string)($user['email'] ?? 'N/A')) ?></span>
+                </div>
+                <div class="du-info-item">
+                    <span class="du-label">Role</span>
+                    <span class="du-value"><?= htmlspecialchars((string)($user['role'] ?? 'N/A')) ?></span>
                 </div>
             </div>
 
             <form method="POST" class="du-form" id="duDeleteForm">
                 <input type="hidden" name="confirm_token" value="<?= htmlspecialchars($confirmToken) ?>">
+                <label class="du-label" for="archive_reason">Reason for archiving</label>
+                <textarea id="archive_reason" name="archive_reason" required maxlength="500" class="du-reason" placeholder="Explain why this user is being archived"><?= htmlspecialchars($reason) ?></textarea>
                 <div class="du-actions">
                     <a href="manage_users.php" class="du-cancel">Cancel</a>
-                    <button type="button" class="du-delete" id="duDeleteBtn"><i class="uil uil-trash"></i> Delete Permanently</button>
+                    <button type="button" class="du-delete" id="duDeleteBtn"><i class="uil uil-archive"></i> Archive User</button>
                 </div>
             </form>
         <?php endif; ?>
@@ -179,9 +203,9 @@ const duDeleteForm = document.getElementById('duDeleteForm');
 if (duDeleteBtn && duDeleteForm && window.AdminConfirm) {
     duDeleteBtn.addEventListener('click', async function () {
         const ok = await window.AdminConfirm.confirm({
-            title: 'Delete This User?',
-            message: 'This action permanently removes the account and cannot be undone.',
-            confirmText: 'Delete Permanently',
+            title: 'Archive This User?',
+            message: 'The account will be deactivated, while historical records are preserved.',
+            confirmText: 'Archive User',
             cancelText: 'Cancel'
         });
         if (ok) duDeleteForm.submit();
@@ -214,6 +238,7 @@ if (duDeleteBtn && duDeleteForm && window.AdminConfirm) {
     border-radius: 10px; padding: 10px 12px; font-size: 12.5px;
     margin-bottom: 12px;
 }
+.du-reason { display:block; width:100%; min-height:78px; resize:vertical; margin:7px 0 14px; border:1px solid #cbd5e1; border-radius:9px; padding:9px 10px; font:inherit; font-size:12.5px; color:#1e293b; }
 .du-alert.error { background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; }
 
 .du-warning {

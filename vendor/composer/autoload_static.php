@@ -97,9 +97,17 @@ class ComposerStaticInitac2d307f4ed514763a8119f3523066bb
             'Svg\\' => 4,
             'Sabberworm\\CSS\\' => 15,
         ),
+        'P' =>
+        array (
+            'PhpOffice\\PhpWord\\' => 18,
+        ),
         'M' =>
         array (
             'Masterminds\\' => 12,
+        ),
+        'L' =>
+        array (
+            'Laminas\\Escaper\\' => 16,
         ),
         'F' =>
         array (
@@ -120,9 +128,17 @@ class ComposerStaticInitac2d307f4ed514763a8119f3523066bb
         array (
             0 => __DIR__ . '/..' . '/sabberworm/php-css-parser/src',
         ),
+        'PhpOffice\\PhpWord\\' =>
+        array (
+            0 => __DIR__ . '/..' . '/phpoffice/phpword/src/PhpWord',
+        ),
         'Masterminds\\' =>
         array (
             0 => __DIR__ . '/..' . '/masterminds/html5/src',
+        ),
+        'Laminas\\Escaper\\' =>
+        array (
+            0 => __DIR__ . '/..' . '/laminas/laminas-escaper/src',
         ),
         'FontLib\\' =>
         array (

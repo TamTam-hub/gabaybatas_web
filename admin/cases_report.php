@@ -53,7 +53,7 @@ $search = trim((string)($_GET['search'] ?? ''));
 $filterStatus = trim((string)($_GET['status'] ?? ''));
 $filterType = trim((string)($_GET['type'] ?? ''));
 $filterPrio = trim((string)($_GET['priority'] ?? ''));
-$filterBrgy = trim((string)($_GET['barangay'] ?? ''));
+$filterBrgy = '';
 $sort = trim((string)($_GET['sort'] ?? 'newest'));
 $includeAll = (string)($_GET['include_all'] ?? '0') === '1';
 $download = (string)($_GET['download'] ?? '') === 'pdf';
@@ -117,10 +117,6 @@ if (!$includeAll) {
     if ($filterPrio !== '' && $priorityColumn) {
         $fp = $conn->real_escape_string($filterPrio);
         $whereParts[] = "LOWER({$priorityColumn}) = LOWER('{$fp}')";
-    }
-    if ($filterBrgy !== '' && $barangayColumn) {
-        $fb = $conn->real_escape_string($filterBrgy);
-        $whereParts[] = "LOWER({$barangayColumn}) = LOWER('{$fb}')";
     }
 }
 
@@ -309,15 +305,6 @@ include('../includes/sidebar_admin.php');
                         <option value="">All Priorities</option>
                         <?php foreach ($priorityOptions as $opt): ?>
                         <option value="<?= htmlspecialchars($opt) ?>" <?= strtolower($filterPrio) === strtolower((string)$opt) ? 'selected' : '' ?>><?= htmlspecialchars((string)$opt) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="cr-field">
-                    <label>Barangay</label>
-                    <select name="barangay">
-                        <option value="">All Barangays</option>
-                        <?php foreach ($barangayOptions as $opt): ?>
-                        <option value="<?= htmlspecialchars($opt) ?>" <?= strtolower($filterBrgy) === strtolower((string)$opt) ? 'selected' : '' ?>><?= htmlspecialchars((string)$opt) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>

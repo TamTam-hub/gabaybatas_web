@@ -6,6 +6,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 }
 
 require_once '../config/database.php';
+require_once '../config/kp.php';
 require_once '../config/barangays.php';
 require_once '../config/case_types.php';
 
@@ -41,7 +42,6 @@ $residentColumn = $hasColumn('resident_name') ? 'resident_name' : ($hasColumn('n
 $complainedColumn = $hasColumn('complained_person') ? 'complained_person' : ($hasColumn('respondent_name') ? 'respondent_name' : ($hasColumn('against_person') ? 'against_person' : null));
 $typeColumn     = $hasColumn('case_type') ? 'case_type' : ($hasColumn('type') ? 'type' : null);
 $statusColumn   = $hasColumn('status') ? 'status' : null;
-$priorityColumn = $hasColumn('priority') ? 'priority' : null;
 $barangayColumn = $hasColumn('barangay') ? 'barangay' : null;
 $dateColumn     = $hasColumn('created_at') ? 'created_at' : ($hasColumn('date_submitted') ? 'date_submitted' : ($hasColumn('updated_at') ? 'updated_at' : null));
 $descriptionColumn = $hasColumn('description') ? 'description' : ($hasColumn('details') ? 'details' : ($hasColumn('remarks') ? 'remarks' : ($hasColumn('notes') ? 'notes' : null)));
@@ -57,7 +57,7 @@ if ($caseIdParam === '') {
     if ($complainedColumn) { $selectFields[] = "$complainedColumn AS complained_person"; }
     if ($typeColumn) { $selectFields[] = "$typeColumn AS case_type"; }
     if ($statusColumn) { $selectFields[] = "$statusColumn AS case_status"; }
-    if ($priorityColumn) { $selectFields[] = "$priorityColumn AS case_priority"; }
+    if ($hasColumn('kp_status')) { $selectFields[] = "kp_status AS case_kp_status"; }
     if ($barangayColumn) { $selectFields[] = "$barangayColumn AS case_barangay"; }
     if ($descriptionColumn) { $selectFields[] = "$descriptionColumn AS case_description"; }
     if ($dateColumn) { $selectFields[] = "$dateColumn AS case_date"; }
@@ -84,9 +84,9 @@ $form = [
     'resident_name' => trim((string)($case['resident_name'] ?? '')),
     'complained_person' => trim((string)($case['complained_person'] ?? '')),
     'case_type' => trim((string)($case['case_type'] ?? '')),
-    'case_status' => trim((string)($case['case_status'] ?? 'Pending')),
-    'case_priority' => trim((string)($case['case_priority'] ?? 'Medium')),
-    'case_barangay' => trim((string)($case['case_barangay'] ?? '')),
+    'case_status' => !empty($case['case_kp_status']) ? trim((string)$case['case_kp_status']) : trim((string)($case['case_status'] ?? 'Pending')),
+    'case_kp_status' => trim((string)($case['case_kp_status'] ?? '')),
+    'case_barangay' => 'Barangay Muñoz',
     'case_description' => trim((string)($case['case_description'] ?? '')),
 ];
 
@@ -101,16 +101,17 @@ if ($form['case_barangay'] !== '') {
     }
 }
 
-$statusOptions = ['Pending', 'In Progress', 'Resolved'];
-$priorityOptions = ['High', 'Medium', 'Low'];
+// Corrections are limited to the statuses the KP procedure allows next.
+$originalStatus = (string)($form['case_status'] ?? 'Pending');
+$statusChoices = kp_correction_status_options($originalStatus);
+$statusOptions = array_keys($statusChoices);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
     $form['resident_name'] = trim((string)($_POST['resident_name'] ?? $form['resident_name']));
     $form['complained_person'] = trim((string)($_POST['complained_person'] ?? $form['complained_person']));
     $form['case_type'] = trim((string)($_POST['case_type'] ?? $form['case_type']));
     $form['case_status'] = trim((string)($_POST['status'] ?? $form['case_status']));
-    $form['case_priority'] = trim((string)($_POST['priority'] ?? $form['case_priority']));
-    $form['case_barangay'] = trim((string)($_POST['barangay'] ?? $form['case_barangay']));
+    $form['case_barangay'] = 'Barangay Muñoz';
     $form['case_description'] = trim((string)($_POST['description'] ?? $form['case_description']));
 
     // Normalize barangay to match valid options (case-insensitive)
@@ -124,10 +125,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
         }
     }
 
+    $changeReason = trim((string)($_POST['change_reason'] ?? ''));
+
     if ($statusColumn && !in_array($form['case_status'], $statusOptions, true)) {
-        $error = 'Please select a valid status.';
-    } elseif ($priorityColumn && !in_array($form['case_priority'], $priorityOptions, true)) {
-        $error = 'Please select a valid priority.';
+        $error = 'This status change is not allowed under the KP procedure.';
+    } elseif ($statusColumn && $form['case_status'] !== $originalStatus && $changeReason === '') {
+        $error = 'Please state the reason for changing the status.';
     } else {
         $setParts = [];
         $types = '';
@@ -138,7 +141,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
             'complained_person' => trim((string)($case['complained_person'] ?? '')),
             'case_type' => trim((string)($case['case_type'] ?? '')),
             'case_status' => trim((string)($case['case_status'] ?? '')),
-            'case_priority' => trim((string)($case['case_priority'] ?? '')),
             'case_barangay' => trim((string)($case['case_barangay'] ?? '')),
             'case_description' => trim((string)($case['case_description'] ?? '')),
         ];
@@ -169,15 +171,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
             $types .= 's';
             $values[] = $form['case_type'];
         }
-        if ($statusColumn && $form['case_status'] !== $current['case_status']) {
+        if ($statusColumn && $form['case_status'] !== $originalStatus) {
+            if (array_key_exists($form['case_status'], kp_statuses())) {
+                $parentSt = kp_status_to_parent($form['case_status']);
+                $kpSt = $form['case_status'];
+            } else {
+                $parentSt = in_array($form['case_status'], ['Pending', 'In Progress', 'Resolved'], true) ? $form['case_status'] : 'Pending';
+                $kpSt = null;
+            }
             $setParts[] = "$statusColumn = ?";
             $types .= 's';
-            $values[] = $form['case_status'];
-        }
-        if ($priorityColumn && $form['case_priority'] !== $current['case_priority']) {
-            $setParts[] = "$priorityColumn = ?";
-            $types .= 's';
-            $values[] = $form['case_priority'];
+            $values[] = $parentSt;
+            if ($hasColumn('kp_status')) {
+                $setParts[] = "kp_status = ?";
+                $types .= 's';
+                $values[] = $kpSt;
+            }
+            $numId = (int)($case['row_id'] ?? 0);
+            if ($numId > 0 && function_exists('kp_log_event')) {
+                $actorId = (int)($_SESSION['user_id'] ?? 0);
+                $actorRole = (string)($_SESSION['role'] ?? 'admin');
+                $actorName = (string)($_SESSION['name'] ?? 'Admin');
+                $stLabel = kp_status_label($kpSt ?: $parentSt);
+                $eventStage = $kpSt ? kp_status_stage($kpSt) : 'intake';
+                $eventStatus = $kpSt ?: strtolower(str_replace(' ', '_', $parentSt));
+                $eventDetails = json_encode([
+                    'parent_status' => $parentSt,
+                    'kp_status' => $kpSt,
+                    'updated_by' => $actorName,
+                    'actor_role' => $actorRole,
+                    'reason' => $changeReason,
+                ], JSON_UNESCAPED_UNICODE);
+                kp_log_event($conn, $numId, $eventStage, $eventStatus, 'status_changed', "Case status updated to '{$stLabel}' by {$actorName}", $eventDetails ?: '', $actorId);
+            }
         }
         if ($barangayColumn && $form['case_barangay'] !== $current['case_barangay']) {
             $setParts[] = "$barangayColumn = ?";
@@ -216,7 +242,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
                     $case['complained_person'] = $form['complained_person'];
                     $case['case_type'] = $form['case_type'];
                     $case['case_status'] = $form['case_status'];
-                    $case['case_priority'] = $form['case_priority'];
                     $case['case_barangay'] = $form['case_barangay'];
                     $case['case_description'] = $form['case_description'];
                     
@@ -308,29 +333,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
                         <div class="ec-field">
                             <label>Status</label>
                             <select name="status" <?= $statusColumn ? '' : 'disabled' ?>>
-                                <?php foreach ($statusOptions as $opt): ?>
-                                <option value="<?= htmlspecialchars($opt) ?>" <?= $form['case_status'] === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
+                                <?php foreach ($statusChoices as $value => $label): ?>
+                                <option value="<?= htmlspecialchars($value) ?>" <?= $form['case_status'] === $value ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
                                 <?php endforeach; ?>
                             </select>
+                            <small style="display:block;margin-top:6px;color:#64748b;">Only the next steps allowed by the KP procedure are listed.</small>
                         </div>
 
                         <div class="ec-field">
-                            <label>Priority</label>
-                            <select name="priority" <?= $priorityColumn ? '' : 'disabled' ?>>
-                                <?php foreach ($priorityOptions as $opt): ?>
-                                <option value="<?= htmlspecialchars($opt) ?>" <?= $form['case_priority'] === $opt ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <label>Reason for status change</label>
+                            <textarea name="change_reason" rows="2" placeholder="Required when changing the status"></textarea>
                         </div>
 
                         <div class="ec-field ec-field-full">
                             <label>Barangay</label>
-                            <select name="barangay" <?= $barangayColumn ? '' : 'disabled' ?>>
-                                <option value="">-- Select Barangay --</option>
-                                <?php foreach (gabaybatas_get_barangays() as $brgy): ?>
-                                <option value="<?= htmlspecialchars($brgy) ?>" <?= $form['case_barangay'] === $brgy ? 'selected' : '' ?>><?= htmlspecialchars($brgy) ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <input type="text" value="Barangay Muñoz" readonly <?= $barangayColumn ? '' : 'disabled' ?>>
+                            <?php if ($barangayColumn): ?><input type="hidden" name="barangay" value="Barangay Muñoz"><?php endif; ?>
                         </div>
 
                         <div class="ec-field ec-field-full">

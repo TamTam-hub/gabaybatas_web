@@ -2,6 +2,9 @@
 session_start();
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') { header('Location: ../login.php'); exit(); }
 require_once '../config/database.php';
+require_once '../config/kp.php';
+require_once '../config/archive.php';
+gabaybatas_archive_ensure_schema($conn);
 
 $caseColumns = [];
 $caseColResult = $conn->query("SHOW COLUMNS FROM cases");
@@ -17,22 +20,28 @@ $hasCaseColumn = static function (string $column) use ($caseColumns): bool {
 
 $rowIdColumn      = $hasCaseColumn('id') ? 'id' : ($hasCaseColumn('case_id') ? 'case_id' : ($caseColumns[0] ?? 'id'));
 $displayIdColumn  = $hasCaseColumn('case_id') ? 'case_id' : ($hasCaseColumn('id') ? 'id' : ($caseColumns[0] ?? 'id'));
+$displayIdExpression = $displayIdColumn;
+if ($hasCaseColumn('case_id') && $hasCaseColumn('id')) {
+    $displayIdExpression = "COALESCE(NULLIF(case_id, ''), CONCAT('C-', LPAD(id, 4, '0')))";
+}
 $residentColumn   = $hasCaseColumn('resident_name') ? 'resident_name' : ($hasCaseColumn('name') ? 'name' : null);
 $typeColumn       = $hasCaseColumn('case_type') ? 'case_type' : ($hasCaseColumn('type') ? 'type' : null);
 $statusColumn     = $hasCaseColumn('status') ? 'status' : null;
+$kpStatusColumn   = $hasCaseColumn('kp_status') ? 'kp_status' : null;
 $barangayColumn   = $hasCaseColumn('barangay') ? 'barangay' : null;
 $dateColumn       = $hasCaseColumn('created_at') ? 'created_at' : ($hasCaseColumn('date_submitted') ? 'date_submitted' : ($hasCaseColumn('updated_at') ? 'updated_at' : null));
 
-$totalRes = $conn->query("SELECT COUNT(*) AS total FROM cases");
+$activeCaseWhere = 'archived_at IS NULL';
+$totalRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere");
 $total = (int)($totalRes ? ($totalRes->fetch_assoc()['total'] ?? 0) : 0);
 
 $pending = 0;
 $progress = 0;
 $resolved = 0;
 if ($statusColumn) {
-    $pendingRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($statusColumn)='pending'");
-    $progressRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($statusColumn)='in progress'");
-    $resolvedRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE LOWER($statusColumn)='resolved'");
+    $pendingRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($statusColumn)='pending'");
+    $progressRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($statusColumn)='in progress'");
+    $resolvedRes = $conn->query("SELECT COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND LOWER($statusColumn)='resolved'");
     $pending = (int)($pendingRes ? ($pendingRes->fetch_assoc()['total'] ?? 0) : 0);
     $progress = (int)($progressRes ? ($progressRes->fetch_assoc()['total'] ?? 0) : 0);
     $resolved = (int)($resolvedRes ? ($resolvedRes->fetch_assoc()['total'] ?? 0) : 0);
@@ -40,15 +49,16 @@ if ($statusColumn) {
 
 $recentFields = [
     "$rowIdColumn AS row_id",
-    "$displayIdColumn AS display_case_id",
+    "$displayIdExpression AS display_case_id",
     ($residentColumn ? "$residentColumn AS display_resident_name" : "'' AS display_resident_name"),
     ($typeColumn ? "$typeColumn AS case_type" : "'' AS case_type"),
     ($statusColumn ? "$statusColumn AS status" : "'' AS status"),
+    ($kpStatusColumn ? "$kpStatusColumn AS kp_status" : "'' AS kp_status"),
     ($barangayColumn ? "$barangayColumn AS display_barangay" : "'' AS display_barangay"),
     ($dateColumn ? "$dateColumn AS display_date" : "NULL AS display_date"),
 ];
 $recentOrderColumn = $dateColumn ?: $rowIdColumn;
-$recentSql = 'SELECT ' . implode(', ', $recentFields) . " FROM cases ORDER BY $recentOrderColumn DESC LIMIT 5";
+$recentSql = 'SELECT ' . implode(', ', $recentFields) . " FROM cases WHERE $activeCaseWhere ORDER BY $recentOrderColumn DESC LIMIT 5";
 $recent = $conn->query($recentSql);
 
 $months = [];
@@ -61,9 +71,9 @@ for ($i = 5; $i >= 0; $i--) {
 
     if ($dateColumn && $statusColumn) {
         $monthExpr = "MONTH($dateColumn) = '{$monthDate->format('m')}' AND YEAR($dateColumn) = '{$monthDate->format('Y')}'";
-        $pendingRes = $conn->query("SELECT COUNT(*) AS t FROM cases WHERE $monthExpr AND LOWER($statusColumn)='pending'");
-        $progressRes = $conn->query("SELECT COUNT(*) AS t FROM cases WHERE $monthExpr AND LOWER($statusColumn)='in progress'");
-        $resolvedRes = $conn->query("SELECT COUNT(*) AS t FROM cases WHERE $monthExpr AND LOWER($statusColumn)='resolved'");
+        $pendingRes = $conn->query("SELECT COUNT(*) AS t FROM cases WHERE $activeCaseWhere AND $monthExpr AND LOWER($statusColumn)='pending'");
+        $progressRes = $conn->query("SELECT COUNT(*) AS t FROM cases WHERE $activeCaseWhere AND $monthExpr AND LOWER($statusColumn)='in progress'");
+        $resolvedRes = $conn->query("SELECT COUNT(*) AS t FROM cases WHERE $activeCaseWhere AND $monthExpr AND LOWER($statusColumn)='resolved'");
         $pendingData[] = (int)($pendingRes ? ($pendingRes->fetch_assoc()['t'] ?? 0) : 0);
         $progressData[] = (int)($progressRes ? ($progressRes->fetch_assoc()['t'] ?? 0) : 0);
         $resolvedData[] = (int)($resolvedRes ? ($resolvedRes->fetch_assoc()['t'] ?? 0) : 0);
@@ -77,7 +87,7 @@ for ($i = 5; $i >= 0; $i--) {
 $types = ['No Data'];
 $typeData = [0];
 if ($typeColumn) {
-    $typeResult = $conn->query("SELECT $typeColumn AS type_name, COUNT(*) AS total FROM cases WHERE $typeColumn IS NOT NULL AND $typeColumn <> '' GROUP BY $typeColumn ORDER BY total DESC LIMIT 5");
+    $typeResult = $conn->query("SELECT $typeColumn AS type_name, COUNT(*) AS total FROM cases WHERE $activeCaseWhere AND $typeColumn IS NOT NULL AND $typeColumn <> '' GROUP BY $typeColumn ORDER BY total DESC LIMIT 5");
     if ($typeResult && $typeResult->num_rows > 0) {
         $types = [];
         $typeData = [];
@@ -96,7 +106,7 @@ $firstName = trim((string)explode(' ', (string)($_SESSION['name'] ?? 'Admin'))[0
 <div class="main">
 <div class="topbar">
     <div class="topbar-left">
-        <div class="topbar-title">Dashboard</div>
+        <div class="topbar-title">Home Dashboard</div>
         <span class="topbar-badge">Overview</span>
     </div>
     <div class="topbar-right">
@@ -195,7 +205,7 @@ $firstName = trim((string)explode(' ', (string)($_SESSION['name'] ?? 'Admin'))[0
         <div class="db-card-head">
             <div>
                 <div class="db-card-title">Recent Cases</div>
-                <div class="db-card-sub">Latest 5 entries across all barangays</div>
+                <div class="db-card-sub">Latest 5 entries for Barangay Muñoz</div>
             </div>
             <a href="all_cases.php" class="db-view-all">View all <i class="uil uil-arrow-right"></i></a>
         </div>
@@ -205,8 +215,11 @@ $firstName = trim((string)explode(' ', (string)($_SESSION['name'] ?? 'Admin'))[0
                 <tbody>
                 <?php if ($recent && $recent->num_rows > 0): ?>
                     <?php while ($row = $recent->fetch_assoc()):
-                        $s = trim((string)($row['status'] ?? ''));
-                        $sLower = strtolower($s);
+                        $legacyStatus = trim((string)($row['status'] ?? ''));
+                        $kpStatusValue = trim((string)($row['kp_status'] ?? ''));
+                        $s = $kpStatusValue !== '' ? kp_status_label($kpStatusValue) : $legacyStatus;
+                        $statusColor = $kpStatusValue !== '' ? kp_status_color($kpStatusValue) : ($legacyStatus === 'Resolved' ? '#15803d' : ($legacyStatus === 'Pending' ? '#92400e' : '#4338ca'));
+                        $sLower = strtolower($legacyStatus);
                         $sc = $sLower === 'pending' ? 'pending' : ($sLower === 'resolved' ? 'resolved' : 'progress');
                         $displayDateRaw = (string)($row['display_date'] ?? '');
                         $displayTs = strtotime($displayDateRaw);
@@ -214,7 +227,13 @@ $firstName = trim((string)explode(' ', (string)($_SESSION['name'] ?? 'Admin'))[0
                         $residentName = trim((string)($row['display_resident_name'] ?? '-'));
                     ?>
                     <tr>
-                        <td><span class="db-case-id"><?= htmlspecialchars((string)($row['display_case_id'] ?? '-')) ?></span></td>
+                        <?php
+                        $caseIdValue = trim((string)($row['display_case_id'] ?? ''));
+                        if ($caseIdValue === '') {
+                            $caseIdValue = 'C-' . str_pad((string)($row['row_id'] ?? ''), 4, '0', STR_PAD_LEFT);
+                        }
+                        ?>
+                        <td><span class="db-case-id"><?= htmlspecialchars($caseIdValue !== '' ? $caseIdValue : '-') ?></span></td>
                         <td>
                             <div class="db-name-cell">
                                 <div class="db-avatar-sm"><?= strtoupper(substr($residentName !== '' ? $residentName : '?', 0, 1)) ?></div>
@@ -222,7 +241,7 @@ $firstName = trim((string)explode(' ', (string)($_SESSION['name'] ?? 'Admin'))[0
                             </div>
                         </td>
                         <td><?= htmlspecialchars((string)($row['case_type'] ?? '-')) ?></td>
-                        <td><span class="db-badge <?= $sc ?>"><?= htmlspecialchars($s !== '' ? $s : '-') ?></span></td>
+                        <td><span class="db-badge <?= $sc ?>" style="color: <?= htmlspecialchars($statusColor) ?>;"><?= htmlspecialchars($s !== '' ? $s : '-') ?></span></td>
                         <td><?= htmlspecialchars((string)($row['display_barangay'] ?? '-')) ?></td>
                         <td class="db-date"><?= htmlspecialchars($displayDate) ?></td>
                         <td><a href="view_case.php?id=<?= urlencode((string)($row['row_id'] ?? '')) ?>" class="db-action-btn"><i class="uil uil-eye"></i> View</a></td>

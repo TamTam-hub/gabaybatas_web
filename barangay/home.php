@@ -2,6 +2,7 @@
 session_start();
 
 require_once '../config/database.php';
+require_once '../config/kp.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
 
 gabaybatas_require_role(['barangay'], '../login.php');
@@ -9,6 +10,8 @@ gabaybatas_block_barangay_delete_requests();
 
 $currentBarangay = gabaybatas_get_user_barangay($conn);
 $hasCaseBarangay = gabaybatas_table_has_column($conn, 'cases', 'barangay');
+$hasArchivedAt = gabaybatas_table_has_column($conn, 'cases', 'archived_at');
+$hasKpStatus = gabaybatas_table_has_column($conn, 'cases', 'kp_status');
 
 $caseColumns = [];
 $colResult = $conn->query("SHOW COLUMNS FROM cases");
@@ -44,7 +47,7 @@ $homeError = '';
 if ($idColumn === null || $displayIdColumn === null || $residentColumn === null) {
     $homeError = 'Cases table is missing required columns to display dashboard data.';
 } else {
-    $whereBase = ' WHERE 1=1' . $scopeSql;
+    $whereBase = ' WHERE 1=1' . ($hasArchivedAt ? ' AND archived_at IS NULL' : '') . $scopeSql;
 
     $totalResult = $conn->query("SELECT COUNT(*) AS c FROM cases" . $whereBase);
     $totalCases = (int)($totalResult ? ($totalResult->fetch_assoc()['c'] ?? 0) : 0);
@@ -62,6 +65,7 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
         "$residentColumn AS resident_name",
         ($typeColumn ? "$typeColumn AS case_type" : "'' AS case_type"),
         ($statusColumn ? "$statusColumn AS case_status" : "'' AS case_status"),
+        ($hasKpStatus ? "kp_status AS case_kp_status" : "'' AS case_kp_status"),
         ($dateColumn ? "$dateColumn AS case_date" : "'' AS case_date"),
         ($descColumn ? "$descColumn AS case_description" : "'' AS case_description"),
     ];
@@ -150,6 +154,110 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
             </div>
         </div>
 
+        <!-- KP MONTHLY REPORT WIDGET -->
+        <?php
+        // Calculate monthly report due date (5th of next month)
+        $kpDueDate = date('Y-m-d', mktime(0, 0, 0, (int)date('n') + 1, 5, (int)date('Y')));
+        $kpDaysLeft = max(0, (int)((strtotime($kpDueDate) - time()) / 86400));
+
+        // Check for cases nearing KP deadlines
+        $kpDeadlineAlerts = [];
+        $dlq = $conn->query(
+            "SELECT id, case_id, name, kp_status, mediation_deadline, conciliation_deadline
+             FROM cases
+             WHERE status = 'In Progress' AND kp_status IS NOT NULL
+               AND (mediation_deadline IS NOT NULL OR conciliation_deadline IS NOT NULL)
+             ORDER BY LEAST(IFNULL(mediation_deadline,'9999-12-31'), IFNULL(conciliation_deadline,'9999-12-31')) ASC
+             LIMIT 5"
+        );
+        if ($dlq) {
+            while ($dlRow = $dlq->fetch_assoc()) {
+                $deadlineDate = null;
+                $deadlineType = '';
+                if (!empty($dlRow['mediation_deadline']) && strtotime($dlRow['mediation_deadline']) > 0) {
+                    $deadlineDate = $dlRow['mediation_deadline'];
+                    $deadlineType = 'Mediation';
+                }
+                if (!empty($dlRow['conciliation_deadline']) && strtotime($dlRow['conciliation_deadline']) > 0) {
+                    $cd = $dlRow['conciliation_deadline'];
+                    if (!$deadlineDate || strtotime($cd) < strtotime($deadlineDate)) {
+                        $deadlineDate = $cd;
+                        $deadlineType = 'Conciliation';
+                    }
+                }
+                if ($deadlineDate) {
+                    $daysLeft = (int)((strtotime($deadlineDate) - time()) / 86400);
+                    if ($daysLeft <= 7) {
+                        $kpDeadlineAlerts[] = [
+                            'case_id' => $dlRow['case_id'],
+                            'id' => $dlRow['id'],
+                            'name' => $dlRow['name'],
+                            'type' => $deadlineType,
+                            'deadline' => $deadlineDate,
+                            'days_left' => $daysLeft,
+                        ];
+                    }
+                }
+            }
+        }
+        ?>
+
+        <?php if (!empty($kpDeadlineAlerts) || $kpDaysLeft <= 10): ?>
+        <div class="kp-dashboard-widgets" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:20px;">
+
+            <!-- Monthly Report Widget -->
+            <?php if ($kpDaysLeft <= 10): ?>
+            <div class="card-box" style="border-left:4px solid <?= $kpDaysLeft <= 3 ? '#dc2626' : ($kpDaysLeft <= 5 ? '#d97706' : '#2563eb') ?>;">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <div style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;
+                        background:<?= $kpDaysLeft <= 3 ? 'rgba(220,38,38,.1);color:#dc2626' : ($kpDaysLeft <= 5 ? 'rgba(217,119,6,.1);color:#d97706' : 'rgba(37,99,235,.1);color:#2563eb') ?>;">
+                        <i class="uil uil-file-graph"></i>
+                    </div>
+                    <div style="flex:1;">
+                        <strong style="font-size:14px;color:#1e293b;">Monthly Transmittal Due</strong>
+                        <p style="margin:2px 0 0;font-size:13px;color:<?= $kpDaysLeft <= 3 ? '#dc2626' : '#64748b' ?>;">
+                            <?php if ($kpDaysLeft <= 0): ?>
+                                ⚠ <strong>OVERDUE</strong> — Generate now!
+                            <?php else: ?>
+                                <?= $kpDaysLeft ?> day<?= $kpDaysLeft > 1 ? 's' : '' ?> left (<?= date('M j', strtotime($kpDueDate)) ?>)
+                            <?php endif; ?>
+                        </p>
+                    </div>
+                    <a href="kp_reports.php" style="padding:6px 14px;background:#2563eb;color:#fff;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">
+                        View →
+                    </a>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Deadline Alerts -->
+            <?php if (!empty($kpDeadlineAlerts)): ?>
+            <div class="card-box" style="border-left:4px solid #f59e0b;">
+                <strong style="font-size:14px;color:#1e293b;display:block;margin-bottom:8px;">
+                    <i class="uil uil-exclamation-triangle" style="color:#f59e0b;"></i> Upcoming KP Deadlines
+                </strong>
+                <?php foreach ($kpDeadlineAlerts as $alert): ?>
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:13px;">
+                    <span>
+                        <a href="case_process.php?id=<?= (int)$alert['id'] ?>" style="color:#2563eb;text-decoration:none;font-weight:600;">
+                            <?= htmlspecialchars($alert['case_id']) ?>
+                        </a>
+                        — <?= $alert['type'] ?>
+                    </span>
+                    <span style="color:<?= $alert['days_left'] <= 3 ? '#dc2626' : '#d97706' ?>;font-weight:600;">
+                        <?php if ($alert['days_left'] <= 0): ?>
+                            EXPIRED
+                        <?php else: ?>
+                            <?= $alert['days_left'] ?>d left
+                        <?php endif; ?>
+                    </span>
+                </div>
+                <?php endforeach; ?>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
+
         <!-- RECENT CASES TABLE -->
         <div class="card-box">
             <div class="section-heading">Recent Cases</div>
@@ -174,8 +282,11 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
                         </tr>
                         <?php elseif ($recentCases && $recentCases->num_rows > 0): ?>
                             <?php while ($row = $recentCases->fetch_assoc()):
-                                $status = trim((string)($row['case_status'] ?? 'Pending'));
-                                $statusClass = $status === 'Pending' ? 'pending' : ($status === 'Resolved' ? 'resolved' : 'progress');
+                                $legacyStatus = trim((string)($row['case_status'] ?? 'Pending'));
+                                $kpStatusValue = trim((string)($row['case_kp_status'] ?? ''));
+                                $status = $kpStatusValue !== '' ? kp_status_label($kpStatusValue) : $legacyStatus;
+                                $statusColor = $kpStatusValue !== '' ? kp_status_color($kpStatusValue) : ($legacyStatus === 'Resolved' ? '#15803d' : ($legacyStatus === 'Pending' ? '#92400e' : '#4338ca'));
+                                $statusClass = $legacyStatus === 'Pending' ? 'pending' : ($legacyStatus === 'Resolved' ? 'resolved' : 'progress');
                                 $dateRaw = (string)($row['case_date'] ?? '');
                                 $dateTs = strtotime($dateRaw);
                                 $dateDisplay = $dateTs !== false ? date('M d, Y h:i A', $dateTs) : ($dateRaw !== '' ? $dateRaw : 'N/A');
@@ -188,7 +299,7 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
                                 <td><strong><?= htmlspecialchars($displayCaseId) ?></strong></td>
                                 <td><?= htmlspecialchars($residentName) ?></td>
                                 <td><?= htmlspecialchars($caseTypeDisplay) ?></td>
-                                <td><span class="badge-status <?= $statusClass ?>"><?= htmlspecialchars($status) ?></span></td>
+                                <td><span class="badge-status <?= $statusClass ?>" style="color: <?= htmlspecialchars($statusColor) ?>;"><?= htmlspecialchars($status) ?></span></td>
                                 <td><?= htmlspecialchars($dateDisplay) ?></td>
                                 <td>
                                     <button

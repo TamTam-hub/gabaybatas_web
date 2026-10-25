@@ -2,6 +2,7 @@
 session_start();
 
 require_once '../config/database.php';
+require_once '../config/kp.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
 gabaybatas_block_barangay_delete_requests();
 
@@ -51,6 +52,8 @@ if ($idColumn === null) {
 	if ($complainedColumn) { $selectFields[] = "$complainedColumn AS complained_person"; }
 	if ($typeColumn)     { $selectFields[] = "$typeColumn AS case_type"; }
 	if ($statusColumn)   { $selectFields[] = "$statusColumn AS case_status"; }
+	if ($hasColumn('kp_status')) { $selectFields[] = "kp_status AS case_kp_status"; }
+	if ($hasColumn('id')) { $selectFields[] = "id AS case_numeric_id"; }
 	if ($barangayColumn) { $selectFields[] = "$barangayColumn AS case_barangay"; }
 	if ($dateColumn)     { $selectFields[] = "$dateColumn AS case_date"; }
 	foreach ($noteColumns as $noteColumn) {
@@ -83,25 +86,60 @@ if ($idColumn === null) {
 	}
 }
 
-$statusOptions = ['Pending', 'In Progress', 'Resolved'];
-$currentStatus = (string)($case['case_status'] ?? 'Pending');
+$currentStatus = !empty($case['case_kp_status']) ? (string)$case['case_kp_status'] : (string)($case['case_status'] ?? 'Pending');
+// Corrections are limited to the statuses the KP procedure allows next.
+$statusChoices = kp_correction_status_options($currentStatus);
+$statusOptions = array_keys($statusChoices);
 $currentNotes = (string)($case['case_notes'] ?? '');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
 	$newStatus = trim((string)($_POST['status'] ?? $currentStatus));
 	$newNotes  = trim((string)($_POST['notes'] ?? $currentNotes));
+	$changeReason = trim((string)($_POST['change_reason'] ?? ''));
+	$statusChanged = $newStatus !== $currentStatus;
 
 	if ($statusColumn && !in_array($newStatus, $statusOptions, true)) {
-		$error = 'Please select a valid status.';
+		$error = 'This status change is not allowed under the KP procedure.';
+	} elseif ($statusChanged && $changeReason === '') {
+		$error = 'Please state the reason for changing the status.';
 	} else {
 		$setParts = [];
 		$types = '';
 		$values = [];
 
-		if ($statusColumn) {
+		if ($statusColumn && $statusChanged) {
+			if (array_key_exists($newStatus, kp_statuses())) {
+				$parentSt = kp_status_to_parent($newStatus);
+				$kpSt = $newStatus;
+			} else {
+				$parentSt = in_array($newStatus, ['Pending', 'In Progress', 'Resolved'], true) ? $newStatus : 'Pending';
+				$kpSt = null;
+			}
 			$setParts[] = "$statusColumn = ?";
 			$types .= 's';
-			$values[] = $newStatus;
+			$values[] = $parentSt;
+			if ($hasColumn('kp_status')) {
+				$setParts[] = "kp_status = ?";
+				$types .= 's';
+				$values[] = $kpSt;
+			}
+			$numId = (int)($case['case_numeric_id'] ?? 0);
+			if ($numId > 0 && function_exists('kp_log_event')) {
+				$actorId = (int)($_SESSION['user_id'] ?? 0);
+				$actorRole = (string)($_SESSION['role'] ?? 'barangay');
+				$actorName = (string)($_SESSION['name'] ?? 'Barangay Official');
+				$stLabel = kp_status_label($kpSt ?: $parentSt);
+				$eventStage = $kpSt ? kp_status_stage($kpSt) : 'intake';
+				$eventStatus = $kpSt ?: strtolower(str_replace(' ', '_', $parentSt));
+				$eventDetails = json_encode([
+					'parent_status' => $parentSt,
+					'kp_status' => $kpSt,
+					'updated_by' => $actorName,
+					'actor_role' => $actorRole,
+					'reason' => $changeReason,
+				], JSON_UNESCAPED_UNICODE);
+				kp_log_event($conn, $numId, $eventStage, $eventStatus, 'status_changed', "Case status updated to '{$stLabel}' by {$actorName}", $eventDetails ?: '', $actorId);
+			}
 		}
 
 		if ($noteColumns) {
@@ -198,10 +236,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
 						<div class="uc-field">
 							<label>Status</label>
 							<select name="status">
-								<?php foreach ($statusOptions as $option): ?>
-								<option value="<?= htmlspecialchars($option) ?>" <?= $currentStatus === $option ? 'selected' : '' ?>><?= htmlspecialchars($option) ?></option>
+								<?php foreach ($statusChoices as $value => $label): ?>
+								<option value="<?= htmlspecialchars($value) ?>" <?= $currentStatus === $value ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
 								<?php endforeach; ?>
 							</select>
+							<small style="display:block;margin-top:6px;color:#64748b;">Only the next steps allowed by the KP procedure are listed. Use the Case Process page for hearings, settlements and certifications.</small>
+						</div>
+						<div class="uc-field">
+							<label>Reason for status change</label>
+							<textarea name="change_reason" rows="2" placeholder="Required when changing the status"></textarea>
 						</div>
 						<div class="uc-field">
 							<label>Notes<?= $noteColumns ? '' : ' (read only)' ?></label>

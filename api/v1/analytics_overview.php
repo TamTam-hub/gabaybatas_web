@@ -21,15 +21,16 @@ $pending = 0;
 $inProgress = 0;
 $resolved = 0;
 
-$totalRes = $conn->query('SELECT COUNT(*) AS c FROM cases');
+$activeCaseWhere = 'archived_at IS NULL';
+$totalRes = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE $activeCaseWhere");
 if ($totalRes) {
     $totalCases = (int)($totalRes->fetch_assoc()['c'] ?? 0);
 }
 
 if ($statusColumn !== null) {
-    $pendingRes = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE LOWER($statusColumn) = 'pending'");
-    $progressRes = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE LOWER($statusColumn) = 'in progress'");
-    $resolvedRes = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE LOWER($statusColumn) = 'resolved'");
+    $pendingRes = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE $activeCaseWhere AND LOWER($statusColumn) = 'pending'");
+    $progressRes = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE $activeCaseWhere AND LOWER($statusColumn) = 'in progress'");
+    $resolvedRes = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE $activeCaseWhere AND LOWER($statusColumn) = 'resolved'");
 
     $pending = (int)(($pendingRes ? $pendingRes->fetch_assoc()['c'] : 0) ?? 0);
     $inProgress = (int)(($progressRes ? $progressRes->fetch_assoc()['c'] : 0) ?? 0);
@@ -38,7 +39,7 @@ if ($statusColumn !== null) {
 
 $byType = [];
 if ($typeColumn !== null) {
-    $typeRes = $conn->query("SELECT $typeColumn AS label, COUNT(*) AS value FROM cases WHERE $typeColumn IS NOT NULL AND $typeColumn <> '' GROUP BY $typeColumn ORDER BY value DESC");
+    $typeRes = $conn->query("SELECT $typeColumn AS label, COUNT(*) AS value FROM cases WHERE $activeCaseWhere AND $typeColumn IS NOT NULL AND $typeColumn <> '' GROUP BY $typeColumn ORDER BY value DESC");
     if ($typeRes) {
         while ($row = $typeRes->fetch_assoc()) {
             $byType[] = [
@@ -51,7 +52,7 @@ if ($typeColumn !== null) {
 
 $byBarangay = [];
 if ($barangayColumn !== null) {
-    $barangayRes = $conn->query("SELECT $barangayColumn AS label, COUNT(*) AS value FROM cases WHERE $barangayColumn IS NOT NULL AND TRIM($barangayColumn) <> '' GROUP BY $barangayColumn ORDER BY value DESC");
+    $barangayRes = $conn->query("SELECT $barangayColumn AS label, COUNT(*) AS value FROM cases WHERE $activeCaseWhere AND $barangayColumn IS NOT NULL AND TRIM($barangayColumn) <> '' GROUP BY $barangayColumn ORDER BY value DESC");
     if ($barangayRes) {
         while ($row = $barangayRes->fetch_assoc()) {
             $byBarangay[] = [
@@ -64,7 +65,7 @@ if ($barangayColumn !== null) {
 
 $byMonth = [];
 if ($dateColumn !== null) {
-    $monthlyRes = $conn->query("SELECT DATE_FORMAT($dateColumn, '%Y-%m') AS month_key, COUNT(*) AS value FROM cases WHERE $dateColumn IS NOT NULL GROUP BY month_key ORDER BY month_key ASC");
+    $monthlyRes = $conn->query("SELECT DATE_FORMAT($dateColumn, '%Y-%m') AS month_key, COUNT(*) AS value FROM cases WHERE $activeCaseWhere AND $dateColumn IS NOT NULL GROUP BY month_key ORDER BY month_key ASC");
     if ($monthlyRes) {
         while ($row = $monthlyRes->fetch_assoc()) {
             $byMonth[] = [

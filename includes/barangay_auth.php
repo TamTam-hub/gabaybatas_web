@@ -51,36 +51,9 @@ if (!function_exists('gabaybatas_require_role')) {
 
     function gabaybatas_get_user_barangay(mysqli $conn): string
     {
-        if (isset($_SESSION['barangay']) && trim((string)$_SESSION['barangay']) !== '') {
-            return trim((string)$_SESSION['barangay']);
-        }
-
-        if (!gabaybatas_table_has_column($conn, 'users', 'barangay')) {
-            return '';
-        }
-
-        $userId = $_SESSION['user_id'] ?? null;
-        if (!$userId) {
-            return '';
-        }
-
-        $stmt = $conn->prepare('SELECT barangay FROM users WHERE id = ? LIMIT 1');
-        if (!$stmt) {
-            return '';
-        }
-
-        $stmt->bind_param('s', $userId);
-        $stmt->execute();
-        $result = $stmt->get_result();
-        $row = $result ? $result->fetch_assoc() : null;
-        $stmt->close();
-
-        $barangay = trim((string)($row['barangay'] ?? ''));
-        if ($barangay !== '') {
-            $_SESSION['barangay'] = $barangay;
-        }
-
-        return $barangay;
+        require_once __DIR__ . '/../config/barangays.php';
+        $_SESSION['barangay'] = 'Barangay Muñoz';
+        return 'Barangay Muñoz';
     }
 
     function gabaybatas_barangay_scope_clause(mysqli $conn, string $column = 'barangay', string $tableAlias = ''): string

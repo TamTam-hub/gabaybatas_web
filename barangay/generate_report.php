@@ -40,6 +40,13 @@ $dateFromRaw = trim((string)($_GET['date_from'] ?? ''));
 $dateToRaw = trim((string)($_GET['date_to'] ?? ''));
 $includeAll = (string)($_GET['include_all'] ?? '0') === '1';
 
+// The monthly report is the official KP Monitoring Form No. 1 for the current month.
+if ($reportType === 'monthly' && !$includeAll) {
+    $nowForMonthly = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
+    header('Location: kp_monitoring_report.php?month=' . $nowForMonthly->format('n') . '&year=' . $nowForMonthly->format('Y'));
+    exit();
+}
+
 $isValidDate = static function (string $value): bool {
     if ($value === '') {
         return false;

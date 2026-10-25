@@ -12,13 +12,19 @@
     <nav>
         <div class="nav-label">Main</div>
         <a href="dashboard.php" <?= ($page === 'dashboard.php') ? 'class="active"' : '' ?>>
-            <i class="uil uil-apps"></i> Dashboard
+            <i class="uil uil-apps"></i> Home Dashboard
         </a>
         <a href="manage_users.php" <?= ($page === 'manage_users.php') ? 'class="active"' : '' ?>>
             <i class="uil uil-users-alt"></i> Manage Users
         </a>
+        <a href="residency_verifications.php" <?= ($page === 'residency_verifications.php') ? 'class="active"' : '' ?>>
+            <i class="uil uil-check-circle"></i> Residency Verification
+        </a>
         <a href="all_cases.php" <?= ($page === 'all_cases.php') ? 'class="active"' : '' ?>>
             <i class="uil uil-folder-open"></i> All Cases
+        </a>
+        <a href="archive.php" <?= ($page === 'archive.php') ? 'class="active"' : '' ?>>
+            <i class="uil uil-archive"></i> Records Archive
         </a>
 
         <div class="nav-label">Insights</div>

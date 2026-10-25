@@ -6,13 +6,6 @@
 
 define('GABAYBATAS_BARANGAYS', [
     'Barangay Muñoz',
-    'Barangay San Pablo',
-    'Barangay Burak',
-    'Barangay 1',
-    'Barangay 2',
-    'Barangay 3',
-    'Barangay 4',
-    'Barangay 5',
 ]);
 
 /**
