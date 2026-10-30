@@ -121,7 +121,7 @@ if ($caseIdParam === '') {
     <div class="page-body dc-body">
         <div class="dc-head fade-up" style="--d:0s">
             <p class="dc-sub">Move a case out of active records while preserving its official history.</p>
-            <a href="all_cases.php" class="dc-back-btn"><i class="uil uil-arrow-left"></i> Back to All Cases</a>
+            <a href="all_cases.php" class="dc-back-btn"><i class="uil uil-arrow-left"></i> Back to Manage Cases</a>
         </div>
 
         <div class="dc-card fade-up" style="--d:.08s">

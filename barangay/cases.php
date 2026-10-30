@@ -11,6 +11,8 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'barangay') {
 require_once '../config/database.php';
 require_once '../config/kp.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
+require_once __DIR__ . '/../includes/pagination.php';
+require_once __DIR__ . '/../includes/flexible_report.php';
 gabaybatas_block_barangay_delete_requests();
 
 $currentBarangay = gabaybatas_get_user_barangay($conn);
@@ -25,11 +27,19 @@ $searchCaseIdRaw = preg_replace('/^\s*C\s*-\s*/i', '', $search_raw);
 $searchCaseId = ctype_digit((string)$searchCaseIdRaw) ? $conn->real_escape_string($searchCaseIdRaw) : '';
 $hasKpStatus = gabaybatas_table_has_column($conn, 'cases', 'kp_status');
 $hasArchivedAt = gabaybatas_table_has_column($conn, 'cases', 'archived_at');
-$general_statuses = ['Pending', 'In Progress', 'Resolved'];
-$kp_status_map = function_exists('kp_statuses') ? kp_statuses() : [];
-$allowed_statuses = array_merge($general_statuses, array_keys($kp_status_map));
-$filter = in_array($filter_raw, $allowed_statuses, true) ? $conn->real_escape_string($filter_raw) : '';
+// Status groups shared with Home, Flexible Reports and the admin pages (includes/flexible_report.php).
+$groups = gabaybatas_flex_groups();
+$isGroupFilter = str_starts_with($filter_raw, 'group:') && isset($groups[substr($filter_raw, 6)]);
+if (!$isGroupFilter && !array_key_exists($filter_raw, kp_statuses())) $filter_raw = '';
+$filter = $filter_raw;
+$statusesByStage = [];
+foreach (kp_statuses() as $key => $info) {
+    $statusesByStage[$info['stage']][$key] = $info['label'];
+}
+$stages = kp_stages();
 $showUpdatedToast = isset($_GET['updated']) && $_GET['updated'] === '1';
+// Case number of a case just added on add_case.php (e.g. C-0056).
+$createdCaseCode = preg_match('/^C-\d{4,}$/', (string)($_GET['created'] ?? '')) ? (string)$_GET['created'] : '';
 
 $query = "SELECT id, {$caseIdDisplayColumn} AS display_case_id, name, complained_person, case_type, status" . ($hasKpStatus ? ", kp_status" : "") . ($hasCaseBarangay ? ", barangay" : "") . ", date_submitted FROM cases WHERE 1";
 if ($hasArchivedAt) {
@@ -45,14 +55,17 @@ if ($search_raw !== '') {
     }
     $query .= ")";
 }
-if ($filter !== '') {
-    if (in_array($filter, $general_statuses, true)) {
-        $query .= " AND status='{$filter}'";
-    } else {
-        $query .= " AND kp_status='{$filter}'";
-    }
+if ($filter !== '' && $hasKpStatus) {
+    $kpStatusSql = "COALESCE(NULLIF(kp_status, ''), 'filed')";
+    $keys = $isGroupFilter ? $groups[substr($filter, 6)]['statuses'] : [$filter];
+    $query .= " AND {$kpStatusSql} IN ('" . implode("','", array_map([$conn, 'real_escape_string'], $keys)) . "')";
 }
-$query .= " ORDER BY date_submitted DESC";
+// One page at a time (includes/pagination.php).
+$totalFiltered = (int)($conn->query("SELECT COUNT(*) AS t FROM ($query) q")->fetch_assoc()['t'] ?? 0);
+$perPage = gabaybatas_per_page(10);
+$pageNo = min(max(1, (int)($_GET['page'] ?? 1)), max(1, (int)ceil($totalFiltered / $perPage)));
+$offset = ($pageNo - 1) * $perPage;
+$query .= " ORDER BY date_submitted DESC LIMIT {$offset}, {$perPage}";
 
 $result = $conn->query($query);
 ?>
@@ -92,40 +105,18 @@ $result = $conn->query($query);
                         <i class="input-icon uil uil-clock"></i>
                         <select name="status" class="filter-input filter-select">
                             <option value="">All Statuses</option>
-                            <optgroup label="General Status">
-                                <option value="Pending" <?= ($filter_raw === 'Pending') ? 'selected' : '' ?>>All Pending</option>
-                                <option value="In Progress" <?= ($filter_raw === 'In Progress') ? 'selected' : '' ?>>All In Progress</option>
-                                <option value="Resolved" <?= ($filter_raw === 'Resolved') ? 'selected' : '' ?>>All Resolved</option>
+                            <optgroup label="Status groups">
+                                <?php foreach ($groups as $gKey => $g): ?>
+                                <option value="group:<?= $gKey ?>" <?= $filter_raw === 'group:' . $gKey ? 'selected' : '' ?>><?= htmlspecialchars($g['label']) ?></option>
+                                <?php endforeach; ?>
                             </optgroup>
-                            <optgroup label="Intake & Review">
-                                <option value="filed" <?= ($filter_raw === 'filed') ? 'selected' : '' ?>>Filed</option>
-                                <option value="under_review" <?= ($filter_raw === 'under_review') ? 'selected' : '' ?>>Under Review</option>
-                                <option value="additional_info_required" <?= ($filter_raw === 'additional_info_required') ? 'selected' : '' ?>>Additional Info Required</option>
-                                <option value="accepted" <?= ($filter_raw === 'accepted') ? 'selected' : '' ?>>Accepted for KP</option>
-                                <option value="not_eligible" <?= ($filter_raw === 'not_eligible') ? 'selected' : '' ?>>Not Eligible for KP</option>
+                            <?php foreach ($statusesByStage as $stage => $statusList): ?>
+                            <optgroup label="<?= htmlspecialchars($stages[$stage]['label'] ?? ucfirst($stage)) ?>">
+                                <?php foreach ($statusList as $key => $label): ?>
+                                <option value="<?= htmlspecialchars($key) ?>" <?= $filter_raw === $key ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+                                <?php endforeach; ?>
                             </optgroup>
-                            <optgroup label="Mediation & Conciliation">
-                                <option value="mediation_scheduled" <?= ($filter_raw === 'mediation_scheduled') ? 'selected' : '' ?>>Mediation Scheduled</option>
-                                <option value="mediation_ongoing" <?= ($filter_raw === 'mediation_ongoing') ? 'selected' : '' ?>>Mediation Ongoing</option>
-                                <option value="mediation_settled" <?= ($filter_raw === 'mediation_settled') ? 'selected' : '' ?>>Settled in Mediation</option>
-                                <option value="pangkat_constitution" <?= ($filter_raw === 'pangkat_constitution') ? 'selected' : '' ?>>Pangkat Constitution</option>
-                                <option value="conciliation_scheduled" <?= ($filter_raw === 'conciliation_scheduled') ? 'selected' : '' ?>>Conciliation Scheduled</option>
-                                <option value="conciliation_ongoing" <?= ($filter_raw === 'conciliation_ongoing') ? 'selected' : '' ?>>Conciliation Ongoing</option>
-                                <option value="conciliation_settled" <?= ($filter_raw === 'conciliation_settled') ? 'selected' : '' ?>>Settled in Conciliation</option>
-                                <option value="mediation_noshow_complainant" <?= ($filter_raw === 'mediation_noshow_complainant') ? 'selected' : '' ?>>Complainant Absent (Mediation)</option>
-                                <option value="conciliation_noshow_complainant" <?= ($filter_raw === 'conciliation_noshow_complainant') ? 'selected' : '' ?>>Complainant Absent (Conciliation)</option>
-                                <option value="conciliation_noshow_respondent" <?= ($filter_raw === 'conciliation_noshow_respondent') ? 'selected' : '' ?>>Respondent Absent (Conciliation)</option>
-                            </optgroup>
-                            <optgroup label="Settlement & Disposition">
-                                <option value="settlement_repudiation" <?= ($filter_raw === 'settlement_repudiation') ? 'selected' : '' ?>>Repudiation Window</option>
-                                <option value="settlement_final" <?= ($filter_raw === 'settlement_final') ? 'selected' : '' ?>>Settlement Final & Executory</option>
-                                <option value="compliance_monitoring" <?= ($filter_raw === 'compliance_monitoring') ? 'selected' : '' ?>>Compliance Monitoring</option>
-                                <option value="execution_pending" <?= ($filter_raw === 'execution_pending') ? 'selected' : '' ?>>Execution Pending</option>
-                                <option value="execution_completed" <?= ($filter_raw === 'execution_completed') ? 'selected' : '' ?>>Execution Completed</option>
-                                <option value="certified_to_court" <?= ($filter_raw === 'certified_to_court') ? 'selected' : '' ?>>Certified to Court</option>
-                                <option value="dismissed" <?= ($filter_raw === 'dismissed') ? 'selected' : '' ?>>Dismissed</option>
-                                <option value="closed" <?= ($filter_raw === 'closed') ? 'selected' : '' ?>>Closed</option>
-                            </optgroup>
+                            <?php endforeach; ?>
                         </select>
                     </div>
                 </div>
@@ -153,7 +144,7 @@ $result = $conn->query($query);
                     <div class="section-heading">All Cases</div>
                     <div class="section-heading-sub"><?= ($search_raw !== '' || $filter_raw !== '') ? 'Filtered results' : 'All recorded cases in your barangay' ?></div>
                 </div>
-                <div class="record-count"><i class="uil uil-folder-open"></i> <?= $result ? $result->num_rows : 0 ?> records</div>
+                <div class="record-count"><i class="uil uil-folder-open"></i> <?= $totalFiltered ?> record<?= $totalFiltered === 1 ? '' : 's' ?></div>
             </div>
 
             <div class="table-wrap">
@@ -217,6 +208,7 @@ $result = $conn->query($query);
                     </tbody>
                 </table>
             </div>
+            <?php gabaybatas_pagination($totalFiltered, $pageNo, $perPage, ['search' => $search_raw, 'status' => $filter_raw], 'cases'); ?>
         </div>
     </div>
 </div>
@@ -230,7 +222,7 @@ $result = $conn->query($query);
 .filter-card { margin-bottom:18px; }
 .filter-form { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; }
 .filter-group { flex:1; min-width:200px; }
-.filter-group-sm { flex:0 0 180px; }
+.filter-group-sm { flex:0 0 230px; }
 .filter-field-label { display:block; font-size:11.5px; font-weight:600; color:var(--text-muted); margin-bottom:6px; }
 .input-icon-wrap { position:relative; }
 .input-icon { position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--text-light); pointer-events:none; font-size:15px; }
@@ -297,6 +289,7 @@ $result = $conn->query($query);
     box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
 }
 .table-action i { font-size:14px; }
+.card-box .gb-pg { margin:14px -24px -22px; border-radius:0 0 8px 8px; }
 .empty-state { padding:24px 12px; text-align:center; }
 .empty-title { font-size:14px; font-weight:700; color:var(--text-main); margin-bottom:6px; }
 .empty-sub { font-size:12.5px; color:var(--text-light); }
@@ -308,5 +301,30 @@ $result = $conn->query($query);
 if (window.AdminToast) {
     window.AdminToast.show('success', 'Case Updated', 'Case updated successfully.');
 }
+</script>
+<?php endif; ?>
+
+<?php if ($createdCaseCode !== ''): ?>
+<script>
+if (window.AdminToast) {
+    window.AdminToast.show(
+        'success',
+        'Case Added',
+        <?= json_encode('Case ' . $createdCaseCode . ' was saved and is now Under Review.', JSON_HEX_TAG) ?>,
+        5000
+    );
+}
+</script>
+<?php endif; ?>
+
+<?php if ($showUpdatedToast || isset($_GET['created'])): ?>
+<script>
+// Drop the one-time flag from the address bar so a refresh does not repeat the message.
+(function () {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('created');
+    url.searchParams.delete('updated');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+})();
 </script>
 <?php endif; ?>

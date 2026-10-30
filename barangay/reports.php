@@ -8,249 +8,35 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'barangay') {
 
 require_once '../config/database.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
+require_once __DIR__ . '/../includes/flexible_report.php';
+require_once __DIR__ . '/../includes/pagination.php';
 gabaybatas_block_barangay_delete_requests();
 
 $currentBarangay = gabaybatas_get_user_barangay($conn);
 
-$caseColumns = [];
-$colResult = $conn->query('SHOW COLUMNS FROM cases');
-if ($colResult) {
-    while ($col = $colResult->fetch_assoc()) {
-        $caseColumns[] = $col['Field'];
-    }
+// Same filters and rows as the PDF (includes/flexible_report.php); the preview shows one page at a time.
+$params = gabaybatas_flex_params($_GET);
+$report = gabaybatas_flex_report($conn, $currentBarangay, $params);
+$perPage = gabaybatas_per_page(10);
+$pageNo = min(max(1, (int)($_GET['page'] ?? 1)), max(1, (int)ceil($report['total'] / $perPage)));
+$previewRows = array_slice($report['rows'], ($pageNo - 1) * $perPage, $perPage);
+$groups = gabaybatas_flex_groups();
+$caseTypes = gabaybatas_flex_case_types($conn, $currentBarangay);
+$stages = kp_stages();
+$statusesByStage = [];
+foreach (kp_statuses() as $key => $info) {
+    $statusesByStage[$info['stage']][$key] = $info['label'];
 }
 
-$hasColumn = static function (string $column) use ($caseColumns): bool {
-    return in_array($column, $caseColumns, true);
-};
-
-$idColumn = $hasColumn('id') ? 'id' : ($hasColumn('case_id') ? 'case_id' : null);
-$displayIdColumn = $hasColumn('case_id') ? 'case_id' : ($hasColumn('id') ? 'id' : null);
-$residentColumn = $hasColumn('name') ? 'name' : ($hasColumn('resident_name') ? 'resident_name' : null);
-$typeColumn = $hasColumn('case_type') ? 'case_type' : ($hasColumn('type') ? 'type' : null);
-$statusColumn = $hasColumn('status') ? 'status' : null;
-$dateColumn = $hasColumn('date_submitted') ? 'date_submitted' : ($hasColumn('created_at') ? 'created_at' : ($hasColumn('updated_at') ? 'updated_at' : null));
-$hasCaseBarangay = $hasColumn('barangay');
-$hasArchivedAt = $hasColumn('archived_at');
-
-$reportType = strtolower(trim((string)($_GET['type'] ?? 'all')));
-$allowedReportTypes = ['all', 'monthly', 'quarterly', 'yearly'];
-if (!in_array($reportType, $allowedReportTypes, true)) {
-    $reportType = 'all';
-}
-
-$statusFilterRaw = trim((string)($_GET['status'] ?? ''));
-$allowedStatuses = ['Pending', 'In Progress', 'Resolved'];
-$statusFilter = '';
-foreach ($allowedStatuses as $allowed) {
-    if (strcasecmp($statusFilterRaw, $allowed) === 0) {
-        $statusFilter = $allowed;
-        break;
-    }
-}
-
-$caseTypeFilter = trim((string)($_GET['case_type'] ?? ''));
-$searchRaw = trim((string)($_GET['search'] ?? ''));
-$dateFromRaw = trim((string)($_GET['date_from'] ?? ''));
-$dateToRaw = trim((string)($_GET['date_to'] ?? ''));
-$includeAll = (string)($_GET['include_all'] ?? '0') === '1';
-
-$isValidDate = static function (string $value): bool {
-    if ($value === '') {
-        return false;
-    }
-
-    $dt = DateTime::createFromFormat('Y-m-d', $value);
-    return $dt !== false && $dt->format('Y-m-d') === $value;
-};
-
-$dateFrom = $isValidDate($dateFromRaw) ? $dateFromRaw : '';
-$dateTo = $isValidDate($dateToRaw) ? $dateToRaw : '';
-if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
-    $tmp = $dateFrom;
-    $dateFrom = $dateTo;
-    $dateTo = $tmp;
-}
-
-$scopeSql = $hasArchivedAt ? " AND archived_at IS NULL" : '';
-if ($hasCaseBarangay && $currentBarangay !== '') {
-    $scopeSql = " AND LOWER(barangay) = LOWER('" . $conn->real_escape_string($currentBarangay) . "')";
-}
-
-$typeOptions = [];
-if ($typeColumn) {
-    $typeSql = "SELECT DISTINCT {$typeColumn} AS v FROM cases WHERE 1=1{$scopeSql} AND {$typeColumn} IS NOT NULL AND TRIM({$typeColumn}) <> '' ORDER BY {$typeColumn} ASC";
-    $typeResult = $conn->query($typeSql);
-    if ($typeResult) {
-        while ($row = $typeResult->fetch_assoc()) {
-            $typeOptions[] = trim((string)($row['v'] ?? ''));
-        }
-    }
-}
-
-$whereParts = ['1=1'];
-if ($scopeSql !== '') {
-    $whereParts[] = ltrim($scopeSql, ' AND');
-}
-
-$appliedFilters = [];
-if (!$includeAll) {
-    $nowYear = (int)date('Y');
-    $nowMonth = (int)date('n');
-
-    if ($reportType === 'monthly' && $dateColumn) {
-        $whereParts[] = "MONTH({$dateColumn}) = {$nowMonth} AND YEAR({$dateColumn}) = {$nowYear}";
-        $appliedFilters[] = 'This Month';
-    } elseif ($reportType === 'quarterly' && $dateColumn) {
-        $currentQuarter = (int)ceil($nowMonth / 3);
-        $quarterStart = (($currentQuarter - 1) * 3) + 1;
-        $quarterEnd = $quarterStart + 2;
-        $whereParts[] = "MONTH({$dateColumn}) BETWEEN {$quarterStart} AND {$quarterEnd} AND YEAR({$dateColumn}) = {$nowYear}";
-        $appliedFilters[] = 'Quarter ' . $currentQuarter;
-    } elseif ($reportType === 'yearly' && $dateColumn) {
-        $whereParts[] = "YEAR({$dateColumn}) = {$nowYear}";
-        $appliedFilters[] = 'Year ' . $nowYear;
-    }
-
-    if ($statusFilter !== '' && $statusColumn) {
-        $safeStatus = $conn->real_escape_string($statusFilter);
-        $whereParts[] = "LOWER({$statusColumn}) = LOWER('{$safeStatus}')";
-        $appliedFilters[] = 'Status: ' . $statusFilter;
-    }
-
-    if ($caseTypeFilter !== '' && $typeColumn) {
-        $safeType = $conn->real_escape_string($caseTypeFilter);
-        $whereParts[] = "LOWER({$typeColumn}) = LOWER('{$safeType}')";
-        $appliedFilters[] = 'Type: ' . $caseTypeFilter;
-    }
-
-    if ($searchRaw !== '') {
-        $safeSearch = $conn->real_escape_string($searchRaw);
-        $searchCaseDigits = preg_replace('/^\s*C\s*-\s*/i', '', $searchRaw);
-        $searchCaseDigits = preg_replace('/\D+/', '', (string)$searchCaseDigits);
-        $searchParts = [];
-
-        if ($residentColumn) {
-            $searchParts[] = "{$residentColumn} LIKE '%{$safeSearch}%'";
-        }
-        if ($typeColumn) {
-            $searchParts[] = "{$typeColumn} LIKE '%{$safeSearch}%'";
-        }
-        if ($displayIdColumn) {
-            $searchParts[] = "CAST({$displayIdColumn} AS CHAR) LIKE '%{$safeSearch}%'";
-        }
-        if ($idColumn) {
-            $searchParts[] = "CAST({$idColumn} AS CHAR) LIKE '%{$safeSearch}%'";
-        }
-        if ($searchCaseDigits !== '' && $displayIdColumn) {
-            $safeDigits = $conn->real_escape_string($searchCaseDigits);
-            $searchParts[] = "CAST({$displayIdColumn} AS CHAR) LIKE '%{$safeDigits}%'";
-        }
-
-        if ($searchParts) {
-            $whereParts[] = '(' . implode(' OR ', $searchParts) . ')';
-            $appliedFilters[] = 'Search';
-        }
-    }
-
-    if ($dateColumn && $dateFrom !== '') {
-        $safeFrom = $conn->real_escape_string($dateFrom);
-        $whereParts[] = "DATE({$dateColumn}) >= '{$safeFrom}'";
-        $appliedFilters[] = 'From ' . $dateFrom;
-    }
-    if ($dateColumn && $dateTo !== '') {
-        $safeTo = $conn->real_escape_string($dateTo);
-        $whereParts[] = "DATE({$dateColumn}) <= '{$safeTo}'";
-        $appliedFilters[] = 'To ' . $dateTo;
-    }
-}
-
-$whereSql = ' WHERE ' . implode(' AND ', $whereParts);
-
-$total = 0;
-$pending = 0;
-$resolved = 0;
-$inProgress = 0;
-$thisMonth = 0;
-
-$totalResult = $conn->query('SELECT COUNT(*) AS total FROM cases' . $whereSql);
-if ($totalResult) {
-    $total = (int)($totalResult->fetch_assoc()['total'] ?? 0);
-}
-
-if ($statusColumn) {
-    $pendingResult = $conn->query("SELECT COUNT(*) AS total FROM cases{$whereSql} AND LOWER({$statusColumn}) = 'pending'");
-    $progressResult = $conn->query("SELECT COUNT(*) AS total FROM cases{$whereSql} AND LOWER({$statusColumn}) = 'in progress'");
-    $resolvedResult = $conn->query("SELECT COUNT(*) AS total FROM cases{$whereSql} AND LOWER({$statusColumn}) = 'resolved'");
-
-    $pending = (int)($pendingResult ? ($pendingResult->fetch_assoc()['total'] ?? 0) : 0);
-    $inProgress = (int)($progressResult ? ($progressResult->fetch_assoc()['total'] ?? 0) : 0);
-    $resolved = (int)($resolvedResult ? ($resolvedResult->fetch_assoc()['total'] ?? 0) : 0);
-}
-
-if ($dateColumn) {
-    $month = (int)date('n');
-    $year = (int)date('Y');
-    $monthResult = $conn->query("SELECT COUNT(*) AS total FROM cases{$whereSql} AND MONTH({$dateColumn}) = {$month} AND YEAR({$dateColumn}) = {$year}");
-    $thisMonth = (int)($monthResult ? ($monthResult->fetch_assoc()['total'] ?? 0) : 0);
-}
-
-$reportRows = [];
-if ($idColumn && $displayIdColumn) {
-    $selectParts = [
-        "{$idColumn} AS row_id",
-        "{$displayIdColumn} AS display_case_id",
-    ];
-    if ($residentColumn) {
-        $selectParts[] = "{$residentColumn} AS resident_name";
-    }
-    if ($typeColumn) {
-        $selectParts[] = "{$typeColumn} AS case_type";
-    }
-    if ($statusColumn) {
-        $selectParts[] = "{$statusColumn} AS case_status";
-    }
-    if ($dateColumn) {
-        $selectParts[] = "{$dateColumn} AS case_date";
-    }
-
-    $orderSql = $dateColumn ? " ORDER BY {$dateColumn} DESC" : " ORDER BY {$idColumn} DESC";
-    $previewSql = 'SELECT ' . implode(', ', $selectParts) . ' FROM cases' . $whereSql . $orderSql . ' LIMIT 200';
-    $previewResult = $conn->query($previewSql);
-    if ($previewResult) {
-        while ($row = $previewResult->fetch_assoc()) {
-            $reportRows[] = $row;
-        }
-    }
-}
-
-$queryBase = [
-    'type' => $reportType,
-    'status' => $statusFilter,
-    'case_type' => $caseTypeFilter,
-    'search' => $searchRaw,
-    'date_from' => $dateFrom,
-    'date_to' => $dateTo,
-    'include_all' => $includeAll ? '1' : '0',
-];
-
-$downloadQuery = $queryBase;
-$downloadQuery['format'] = 'pdf';
-$downloadUrl = 'generate_report.php?' . http_build_query($downloadQuery);
-
-$allDataQuery = [
-    'type' => 'all',
-    'include_all' => '1',
-    'format' => 'pdf',
-];
-$allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
+$downloadUrl = 'generate_report.php?' . http_build_query(array_filter($params, static fn($v) => $v !== ''));
+$allDataUrl = 'generate_report.php?period=all';
 ?>
 <?php include('../includes/header.php'); ?>
 <?php include('../includes/sidebar_barangay.php'); ?>
 
 <div class="main">
     <div class="topbar">
-        <div class="topbar-title">Reports</div>
+        <div class="topbar-title">Flexible Reports</div>
         <div class="topbar-right">
             <div class="icon-btn" title="Notifications">
                 <i class="uil uil-bell"></i>
@@ -269,63 +55,65 @@ $allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
     <div class="page-body">
         <div class="page-header">
             <div>
-                <div class="page-header-title">Flexible Reports</div>
-                <div class="page-header-sub">Choose exactly what data to preview and download.</div>
+                <div class="page-header-sub">Choose exactly what data to preview and download. Archived cases are not included.</div>
             </div>
         </div>
 
         <div class="card-box filter-card">
             <form method="GET" class="filter-form" id="reportFilterForm">
                 <div class="filter-group">
-                    <label class="filter-label">Report Scope</label>
-                    <select class="filter-input" name="type" id="reportTypeInput">
-                        <option value="all" <?= $reportType === 'all' ? 'selected' : '' ?>>All Periods</option>
-                        <option value="monthly" <?= $reportType === 'monthly' ? 'selected' : '' ?>>This Month (KP Monitoring Form No. 1)</option>
-                        <option value="quarterly" <?= $reportType === 'quarterly' ? 'selected' : '' ?>>This Quarter</option>
-                        <option value="yearly" <?= $reportType === 'yearly' ? 'selected' : '' ?>>This Year</option>
+                    <label class="filter-label" for="periodInput">Period</label>
+                    <select class="filter-input" name="period" id="periodInput">
+                        <option value="all" <?= $params['period'] === 'all' ? 'selected' : '' ?>>All Periods</option>
+                        <option value="month" <?= $params['period'] === 'month' ? 'selected' : '' ?>>This Month</option>
+                        <option value="quarter" <?= $params['period'] === 'quarter' ? 'selected' : '' ?>>This Quarter</option>
+                        <option value="year" <?= $params['period'] === 'year' ? 'selected' : '' ?>>This Year</option>
+                        <option value="custom" <?= $params['period'] === 'custom' ? 'selected' : '' ?>>Custom Dates</option>
                     </select>
                 </div>
 
+                <div class="filter-group filter-date">
+                    <label class="filter-label" for="dateFromInput">From</label>
+                    <input class="filter-input" type="date" name="date_from" id="dateFromInput" value="<?= htmlspecialchars($params['date_from']) ?>">
+                </div>
+
+                <div class="filter-group filter-date">
+                    <label class="filter-label" for="dateToInput">To</label>
+                    <input class="filter-input" type="date" name="date_to" id="dateToInput" value="<?= htmlspecialchars($params['date_to']) ?>">
+                </div>
+
                 <div class="filter-group">
-                    <label class="filter-label">Status</label>
+                    <label class="filter-label" for="statusInput">Status</label>
                     <select class="filter-input" name="status" id="statusInput">
                         <option value="">All Statuses</option>
-                        <?php foreach ($allowedStatuses as $statusOpt): ?>
-                        <option value="<?= htmlspecialchars($statusOpt) ?>" <?= $statusFilter === $statusOpt ? 'selected' : '' ?>><?= htmlspecialchars($statusOpt) ?></option>
+                        <optgroup label="Status groups">
+                            <?php foreach ($groups as $key => $group): ?>
+                            <option value="group:<?= $key ?>" <?= $params['status'] === 'group:' . $key ? 'selected' : '' ?>><?= htmlspecialchars($group['label']) ?></option>
+                            <?php endforeach; ?>
+                        </optgroup>
+                        <?php foreach ($statusesByStage as $stage => $statusList): ?>
+                        <optgroup label="<?= htmlspecialchars($stages[$stage]['label'] ?? ucfirst($stage)) ?>">
+                            <?php foreach ($statusList as $key => $label): ?>
+                            <option value="<?= htmlspecialchars($key) ?>" <?= $params['status'] === $key ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+                            <?php endforeach; ?>
+                        </optgroup>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
                 <div class="filter-group">
-                    <label class="filter-label">Case Type</label>
+                    <label class="filter-label" for="caseTypeInput">Case Type</label>
                     <select class="filter-input" name="case_type" id="caseTypeInput">
                         <option value="">All Types</option>
-                        <?php foreach ($typeOptions as $typeOpt): ?>
-                        <option value="<?= htmlspecialchars($typeOpt) ?>" <?= $caseTypeFilter === $typeOpt ? 'selected' : '' ?>><?= htmlspecialchars($typeOpt) ?></option>
+                        <?php foreach ($caseTypes as $typeOpt): ?>
+                        <option value="<?= htmlspecialchars($typeOpt) ?>" <?= $params['case_type'] === $typeOpt ? 'selected' : '' ?>><?= htmlspecialchars($typeOpt) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
 
                 <div class="filter-group">
-                    <label class="filter-label">Search</label>
-                    <input class="filter-input" type="text" name="search" id="searchInput" value="<?= htmlspecialchars($searchRaw) ?>" placeholder="Resident, type, or case ID">
-                </div>
-
-                <div class="filter-group filter-date">
-                    <label class="filter-label">From</label>
-                    <input class="filter-input" type="date" name="date_from" id="dateFromInput" value="<?= htmlspecialchars($dateFrom) ?>">
-                </div>
-
-                <div class="filter-group filter-date">
-                    <label class="filter-label">To</label>
-                    <input class="filter-input" type="date" name="date_to" id="dateToInput" value="<?= htmlspecialchars($dateTo) ?>">
-                </div>
-
-                <div class="filter-group filter-check">
-                    <label class="check-wrap">
-                        <input type="checkbox" name="include_all" value="1" id="includeAllInput" <?= $includeAll ? 'checked' : '' ?>>
-                        <span>Generate everything (ignore filters)</span>
-                    </label>
+                    <label class="filter-label" for="searchInput">Search</label>
+                    <input class="filter-input" type="text" name="search" id="searchInput" value="<?= htmlspecialchars($params['search']) ?>" placeholder="Case no., complainant, respondent">
                 </div>
 
                 <div class="filter-actions">
@@ -337,152 +125,97 @@ $allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
             </form>
             <div class="applied-row">
                 <strong>Applied:</strong>
-                <?php if ($includeAll): ?>
-                    <span class="applied-pill">All Data (Barangay Scope)</span>
-                <?php elseif ($appliedFilters): ?>
-                    <?php foreach ($appliedFilters as $filterLabel): ?>
+                <?php if ($report['applied']): ?>
+                    <?php foreach ($report['applied'] as $filterLabel): ?>
                     <span class="applied-pill"><?= htmlspecialchars($filterLabel) ?></span>
                     <?php endforeach; ?>
                 <?php else: ?>
-                    <span class="applied-note">No extra filters applied. Showing all available barangay records.</span>
+                    <span class="applied-note">No filters. Showing all non-archived cases of Barangay <?= htmlspecialchars(KP_BARANGAY_NAME) ?>.</span>
                 <?php endif; ?>
             </div>
         </div>
 
-        <div class="stats-row">
-            <div class="card-box stat-card">
-                <div>
-                    <div class="stat-label">Dataset Total</div>
-                    <div class="stat-value"><?= (int)$total ?></div>
-                    <div class="stat-sub">records in generated scope</div>
-                </div>
-            </div>
-            <div class="card-box stat-card">
-                <div>
-                    <div class="stat-label">Pending</div>
-                    <div class="stat-value"><?= (int)$pending ?></div>
-                    <div class="stat-sub">awaiting action</div>
-                </div>
-            </div>
-            <div class="card-box stat-card">
-                <div>
-                    <div class="stat-label">In Progress</div>
-                    <div class="stat-value"><?= (int)$inProgress ?></div>
-                    <div class="stat-sub">active handling</div>
-                </div>
-            </div>
-            <div class="card-box stat-card">
-                <div>
-                    <div class="stat-label">Resolved</div>
-                    <div class="stat-value"><?= (int)$resolved ?></div>
-                    <div class="stat-sub">closed cases</div>
-                </div>
-            </div>
-            <div class="card-box stat-card">
-                <div>
-                    <div class="stat-label">This Month</div>
-                    <div class="stat-value"><?= (int)$thisMonth ?></div>
-                    <div class="stat-sub">in current month</div>
-                </div>
-            </div>
-        </div>
-
-        <?php if ($reportType === 'monthly' && !$includeAll): ?>
-        <div class="card-box" style="border-left:4px solid #2563eb;">
-            <div class="section-heading">Monthly report: KP Monitoring Form No. 1</div>
-            <div class="section-heading-sub">The monthly download uses the official DILG format: KP cases filed this month, their nature and the action taken. The status, type and search filters do not apply to it. For another month, use <a href="kp_reports.php">KP Reports</a>.</div>
-        </div>
-        <?php endif; ?>
+        <?php gabaybatas_summary_cards($report['total'], $report['counts'], $report['period_label']); ?>
 
         <div class="card-box">
             <div class="table-card-header">
                 <div>
                     <div class="section-heading">Preview of Report Data</div>
-                    <div class="section-heading-sub">These are the exact rows that will be downloaded.</div>
+                    <div class="section-heading-sub">These are the cases included in the downloaded PDF.</div>
                 </div>
-                <div class="record-count"><?= count($reportRows) ?> preview rows (max 200)</div>
+                <div class="record-count">
+                    <?= $report['total'] ?> case<?= $report['total'] === 1 ? '' : 's' ?> in the PDF
+                </div>
             </div>
 
             <div class="table-wrap">
                 <table class="table-dashboard">
                     <thead>
                         <tr>
-                            <th>Case ID</th>
-                            <th>Resident Name</th>
+                            <th>Case No.</th>
+                            <th>Complainant</th>
+                            <th>Respondent</th>
                             <th>Case Type</th>
                             <th>Status</th>
                             <th>Date Filed</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if ($reportRows): ?>
-                            <?php foreach ($reportRows as $row):
-                                $statusText = trim((string)($row['case_status'] ?? ''));
-                                $statusClass = strtolower(str_replace(' ', '-', $statusText));
-                                $dateRaw = (string)($row['case_date'] ?? '');
-                                $dateTs = strtotime($dateRaw);
-                                $dateDisplay = $dateTs !== false ? date('M d, Y h:i A', $dateTs) : ($dateRaw !== '' ? $dateRaw : 'N/A');
+                        <?php if ($previewRows): ?>
+                            <?php foreach ($previewRows as $row):
+                                $color = kp_status_color($row['kp_status']);
+                                $dateTs = strtotime((string)$row['date_submitted']);
                             ?>
                             <tr>
-                                <td><strong><?= htmlspecialchars(gabaybatas_format_case_id($row['display_case_id'] ?? '', $row['row_id'] ?? '')) ?></strong></td>
-                                <td><?= htmlspecialchars((string)($row['resident_name'] ?? 'N/A')) ?></td>
-                                <td><?= htmlspecialchars((string)($row['case_type'] ?? 'N/A')) ?></td>
-                                <td><span class="status-badge status-<?= htmlspecialchars($statusClass ?: 'pending') ?>"><?= htmlspecialchars($statusText !== '' ? $statusText : 'N/A') ?></span></td>
-                                <td><?= htmlspecialchars($dateDisplay) ?></td>
+                                <td><strong><?= htmlspecialchars(gabaybatas_format_case_id($row['case_id'] ?? '', $row['id'] ?? '')) ?></strong></td>
+                                <td><?= htmlspecialchars((string)($row['name'] ?: '—')) ?></td>
+                                <td><?= htmlspecialchars((string)($row['complained_person'] ?: '—')) ?></td>
+                                <td><?= htmlspecialchars((string)($row['case_type'] ?: '—')) ?></td>
+                                <td><span class="status-badge" style="background:<?= $color ?>18;color:<?= $color ?>;border:1px solid <?= $color ?>33;"><?= htmlspecialchars(kp_status_label($row['kp_status'])) ?></span></td>
+                                <td><?= $dateTs ? date('M d, Y h:i A', $dateTs) : 'N/A' ?></td>
                             </tr>
                             <?php endforeach; ?>
                         <?php else: ?>
                         <tr>
-                            <td colspan="5" class="empty-row">No records matched your selected filters.</td>
+                            <td colspan="6" class="empty-row">No cases match the selected filters.</td>
                         </tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
             </div>
+            <?php gabaybatas_pagination($report['total'], $pageNo, $perPage, $params, 'cases'); ?>
         </div>
     </div>
 </div>
 
 <script>
 (function () {
-    const includeAll = document.getElementById('includeAllInput');
-    const controls = [
-        document.getElementById('reportTypeInput'),
-        document.getElementById('statusInput'),
-        document.getElementById('caseTypeInput'),
-        document.getElementById('searchInput'),
-        document.getElementById('dateFromInput'),
-        document.getElementById('dateToInput')
-    ].filter(Boolean);
-
-    if (!includeAll) return;
-
-    function syncDisabledState() {
-        const disabled = includeAll.checked;
-        controls.forEach(function (control) {
-            control.disabled = disabled;
+    // The date range applies only to "Custom Dates".
+    const period = document.getElementById('periodInput');
+    const dates = [document.getElementById('dateFromInput'), document.getElementById('dateToInput')];
+    function syncDates() {
+        const custom = period.value === 'custom';
+        dates.forEach(function (input) {
+            input.disabled = !custom;
+            input.closest('.filter-group').classList.toggle('is-disabled', !custom);
         });
     }
-
-    includeAll.addEventListener('change', syncDisabledState);
-    syncDisabledState();
+    period.addEventListener('change', syncDates);
+    syncDates();
 })();
 </script>
 
 <style>
 .page-header { margin-bottom: 18px; }
-.page-header-title { font-family: 'Source Serif 4', serif; font-size: 21px; font-weight: 700; color: var(--text-main); }
 .page-header-sub { font-size: 13px; color: var(--text-light); margin-top: 3px; }
 
 .filter-card { margin-bottom: 16px; }
-.filter-form { display: grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap: 10px; align-items: end; }
+.filter-form { display: grid; grid-template-columns: 1fr 150px 150px 1.3fr 1fr 1.2fr; gap: 10px; align-items: end; }
 .filter-group { display: flex; flex-direction: column; gap: 6px; }
-.filter-date { max-width: 170px; }
+.filter-group.is-disabled { opacity: .45; }
 .filter-label { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--text-muted); font-weight: 700; }
-.filter-input { width: 100%; border: 1px solid #dbe3ef; border-radius: 8px; padding: 9px 10px; background: #fff; font-size: 12.5px; color: #1f2937; }
+.filter-input { width: 100%; border: 1px solid #dbe3ef; border-radius: 8px; padding: 9px 10px; background: #fff; font-size: 12.5px; color: #1f2937; box-sizing: border-box; }
 .filter-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.12); }
-.filter-check { grid-column: span 2; }
-.check-wrap { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: #334155; }
 
 .filter-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
 .btn-action { display: inline-flex; align-items: center; gap: 6px; border-radius: 8px; padding: 9px 12px; font-size: 12.5px; font-weight: 600; text-decoration: none; border: 1px solid transparent; }
@@ -497,6 +230,7 @@ $allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
 
 .stats-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 16px; }
 .stat-card { display: flex; align-items: center; justify-content: space-between; }
+.stat-total { border-top: 3px solid #0e2242; }
 .stat-label { font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: #64748b; font-weight: 700; }
 .stat-value { font-family: 'Source Serif 4', serif; font-size: 30px; color: #0f172a; line-height: 1.1; }
 .stat-sub { font-size: 11.5px; color: #94a3b8; }
@@ -511,12 +245,10 @@ $allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
 .table-dashboard th { background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; font-weight: 700; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }
 .table-dashboard td { font-size: 13px; color: #1f2937; padding: 11px 12px; border-bottom: 1px solid #eef2f7; }
 .table-dashboard tr:last-child td { border-bottom: none; }
+.card-box .gb-pg { margin: 14px -24px -22px; border-radius: 0 0 8px 8px; }
 .empty-row { text-align: center; color: #94a3b8; padding: 24px 10px; }
 
-.status-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; }
-.status-pending { background: #fffbeb; color: #92400e; }
-.status-in-progress { background: #eef2ff; color: #3730a3; }
-.status-resolved { background: #dcfce7; color: #166534; }
+.status-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }
 
 @media (max-width: 1200px) {
     .filter-form { grid-template-columns: repeat(3, minmax(130px, 1fr)); }
@@ -525,7 +257,6 @@ $allDataUrl = 'generate_report.php?' . http_build_query($allDataQuery);
 
 @media (max-width: 760px) {
     .filter-form { grid-template-columns: 1fr; }
-    .filter-check { grid-column: auto; }
     .stats-row { grid-template-columns: 1fr 1fr; }
 }
 </style>

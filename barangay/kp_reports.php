@@ -1,13 +1,9 @@
 <?php
 /**
- * KP Reports — Monthly Transmittal & Case Statistics
- * Phase 9: Reporting & Monthly Transmittal
+ * KP Reports — monthly case summary and the monthly report.
  *
- * Features:
- * - Monthly Transmittal of Final Reports (KP Form #28)
- * - Auto-populate from settled/awarded/certified cases
- * - Case statistics by month/status
- * - Generate & download Form #28 DOCX
+ * The monthly report is KP Monitoring Form No. 1 (includes/kp_monitoring.php),
+ * prepared within the first 5 days of the following month.
  */
 session_start();
 
@@ -36,74 +32,10 @@ $monthYearLabel = "{$monthName} {$selYear}";
 $startDate = sprintf('%04d-%02d-01', $selYear, $selMonth);
 $endDate   = date('Y-m-t', mktime(0, 0, 0, $selMonth, 1, $selYear));
 
-// ─── Query resolved/settled/certified cases for the selected month ──────────
-
-// Cases settled (amicable settlement final in this month)
-$settledQuery = $conn->prepare(
-    "SELECT c.id, c.case_id, c.name, c.complained_person, c.kp_status,
-            s.settlement_type, s.settlement_date, s.terms
-     FROM cases c
-     LEFT JOIN kp_settlements s ON s.case_id = c.id
-     WHERE c.archived_at IS NULL AND LOWER(c.barangay) = LOWER(?)
-       AND c.kp_status IN ('mediation_settled','conciliation_settled','settlement_final','closed','execution_completed')
-       AND (s.settlement_date BETWEEN ? AND ? OR c.date_submitted BETWEEN ? AND ?)
-     ORDER BY c.id ASC"
-);
-$settledQuery->bind_param('sssss', $barangayFilter, $startDate, $endDate, $startDate, $endDate);
-$settledQuery->execute();
-$settledCases = $settledQuery->get_result()->fetch_all(MYSQLI_ASSOC);
-$settledQuery->close();
-
-// Cases certified to court
-$certQuery = $conn->prepare(
-    "SELECT c.id, c.case_id, c.name, c.complained_person, c.kp_status, c.date_submitted
-     FROM cases c
-     WHERE c.archived_at IS NULL AND LOWER(c.barangay) = LOWER(?)
-       AND c.kp_status IN ('certified_to_court','dismissed')
-       AND c.date_submitted BETWEEN ? AND ?
-     ORDER BY c.id ASC"
-);
-$certQuery->bind_param('sss', $barangayFilter, $startDate, $endDate);
-$certQuery->execute();
-$certifiedCases = $certQuery->get_result()->fetch_all(MYSQLI_ASSOC);
-$certQuery->close();
-
-// Cases with arbitration awards
-$arbQuery = $conn->prepare(
-    "SELECT c.id, c.case_id, c.name, c.complained_person, c.kp_status
-     FROM cases c
-     WHERE c.archived_at IS NULL AND LOWER(c.barangay) = LOWER(?)
-       AND c.kp_status IN ('arbitration_awarded')
-       AND c.date_submitted BETWEEN ? AND ?
-     ORDER BY c.id ASC"
-);
-$arbQuery->bind_param('sss', $barangayFilter, $startDate, $endDate);
-$arbQuery->execute();
-$arbCases = $arbQuery->get_result()->fetch_all(MYSQLI_ASSOC);
-$arbQuery->close();
-
-// All cases filed this month
-$filedQuery = $conn->prepare(
-    "SELECT COUNT(*) as cnt FROM cases WHERE archived_at IS NULL AND LOWER(barangay) = LOWER(?) AND date_submitted BETWEEN ? AND ?"
-);
-$filedQuery->bind_param('sss', $barangayFilter, $startDate, $endDate);
-$filedQuery->execute();
-$totalFiled = (int)$filedQuery->get_result()->fetch_assoc()['cnt'];
-$filedQuery->close();
-
-// Cases still pending
-$pendQuery = $conn->prepare(
-    "SELECT COUNT(*) as cnt FROM cases WHERE archived_at IS NULL AND LOWER(barangay) = LOWER(?) AND status = 'Pending' AND date_submitted BETWEEN ? AND ?"
-);
-$pendQuery->bind_param('sss', $barangayFilter, $startDate, $endDate);
-$pendQuery->execute();
-$totalPending = (int)$pendQuery->get_result()->fetch_assoc()['cnt'];
-$pendQuery->close();
-
 // KP status breakdown for the month
 $breakdownQuery = $conn->prepare(
     "SELECT kp_status, COUNT(*) as cnt FROM cases
-     WHERE archived_at IS NULL AND LOWER(barangay) = LOWER(?) AND date_submitted BETWEEN ? AND ? AND kp_status IS NOT NULL
+     WHERE archived_at IS NULL AND LOWER(barangay) = LOWER(?) AND DATE(date_submitted) BETWEEN ? AND ? AND kp_status IS NOT NULL
      GROUP BY kp_status ORDER BY cnt DESC"
 );
 $breakdownQuery->bind_param('sss', $barangayFilter, $startDate, $endDate);
@@ -113,109 +45,22 @@ $breakdownQuery->close();
 
 $monitoring = kp_monitoring_rows($conn, $currentBarangay, $selYear, $selMonth);
 
-$totalSettled = count($settledCases);
-$totalCertified = count($certifiedCases);
-$totalArbitrated = count($arbCases);
+// Summary cards use the Monitoring Form's own figures, so the page and the report agree.
+$totalFiled = count($monitoring['rows']);
+$totalSettled = $monitoring['totals']['mediation'] + $monitoring['totals']['conciliation'] + $monitoring['totals']['arbitration'];
+$totalCertified = $monitoring['totals']['certified'] + $monitoring['totals']['repudiation'] + $monitoring['totals']['dismissed'];
+$totalPending = $monitoring['totals']['pending'];
+$breakdownTotal = array_sum(array_map(static fn($r) => (int)$r['cnt'], $statusBreakdown));
+$stages = kp_stages();
 
 // ─── Monthly Report Due Date Calculation ────────────────────────────────────
-// Per KP rules, monthly transmittal is due by the 5th of the following month
+// The monthly report (KP Monitoring Form No. 1) is due within the first 5 days of the following month
 $currentMonth = (int)date('n');
 $currentYear  = (int)date('Y');
 $dueDate = date('Y-m-d', mktime(0, 0, 0, $currentMonth + 1, 5, $currentYear));
-$daysUntilDue = (int)((strtotime($dueDate) - time()) / 86400);
-if ($daysUntilDue < 0) $daysUntilDue = 0;
+// Whole calendar days, so the due date itself counts as "due today".
+$daysUntilDue = (int)(new DateTime(date('Y-m-d')))->diff(new DateTime($dueDate))->format('%r%a');
 
-// Check if current month's report has been generated
-$reportCheck = $conn->prepare(
-    "SELECT id, generated_at FROM kp_documents
-     WHERE form_number = 28 AND generated_at BETWEEN ? AND ?
-     ORDER BY id DESC LIMIT 1"
-);
-$curMonthStart = date('Y-m-01');
-$curMonthEnd   = date('Y-m-t');
-$reportCheck->bind_param('ss', $curMonthStart, $curMonthEnd);
-$reportCheck->execute();
-$existingReport = $reportCheck->get_result()->fetch_assoc();
-$reportCheck->close();
-
-// ─── Handle Form #28 Generation ─────────────────────────────────────────────
-$genSuccess = false;
-$genError   = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'generate_form28') {
-    // Build the case list text for the template
-    $caseLines = [];
-    $lineNo = 1;
-
-    foreach ($settledCases as $sc) {
-        $caseLines[] = "{$lineNo}. {$sc['case_id']} — {$sc['name']} vs. {$sc['complained_person']} — Settled (Amicable)";
-        $lineNo++;
-    }
-    foreach ($arbCases as $ac) {
-        $caseLines[] = "{$lineNo}. {$ac['case_id']} — {$ac['name']} vs. {$ac['complained_person']} — Arbitration Award";
-        $lineNo++;
-    }
-    foreach ($certifiedCases as $cc) {
-        $status = $cc['kp_status'] === 'dismissed' ? 'Dismissed' : 'Certified to Court';
-        $caseLines[] = "{$lineNo}. {$cc['case_id']} — {$cc['name']} vs. {$cc['complained_person']} — {$status}";
-        $lineNo++;
-    }
-
-    if (empty($caseLines)) {
-        $caseListText = 'No cases resolved for this period.';
-    } else {
-        $caseListText = implode("\n", $caseLines);
-    }
-
-    // Build a dummy case array for the template engine
-    $dummyCase = [
-        'id' => 0,
-        'case_id' => 'REPORT',
-        'name' => '',
-        'complained_person' => '',
-        'date_submitted' => $startDate,
-    ];
-
-    $extra = [
-        'report_month_year'  => $monthYearLabel,
-        'monthly_case_list'  => $caseListText,
-        'total_settled'      => (string)($totalSettled + $totalArbitrated),
-        'total_certified'    => (string)$totalCertified,
-        'cert_signer_name'   => $_SESSION['name'] ?? 'Lupon Secretary',
-    ];
-
-    // Generate into a reports subdirectory
-    $reportDir = KP_DOCUMENT_DIR . 'reports/';
-    if (!is_dir($reportDir)) mkdir($reportDir, 0755, true);
-
-    $formInfo = kp_form_info(28);
-    $templatePath = KP_TEMPLATE_DIR . ($formInfo['template'] ?? '');
-
-    if (file_exists($templatePath)) {
-        try {
-            $template = new \PhpOffice\PhpWord\TemplateProcessor($templatePath);
-            $data = kp_build_template_data($dummyCase, $extra);
-            foreach ($data as $key => $value) {
-                $template->setValue($key, htmlspecialchars((string)$value, ENT_XML1, 'UTF-8'));
-            }
-
-            $outputName = "KP_Form_28_Transmittal_{$selYear}_{$selMonth}.docx";
-            $outputPath = $reportDir . $outputName;
-            $template->saveAs($outputPath);
-
-            // Save document record
-            kp_save_document_record($conn, 0, 28, $outputPath, '', (int)($_SESSION['user_id'] ?? 0));
-            $genSuccess = true;
-        } catch (Exception $e) {
-            $genError = 'Error generating Form #28: ' . $e->getMessage();
-        }
-    } else {
-        $genError = 'Form #28 template not found.';
-    }
-}
-
-// Check for existing report for selected month
-$reportFile = KP_DOCUMENT_DIR . "reports/KP_Form_28_Transmittal_{$selYear}_{$selMonth}.docx";
-$hasReport = file_exists($reportFile);
 ?>
 <?php include('../includes/header.php'); ?>
 <?php include('../includes/sidebar_barangay.php'); ?>
@@ -223,7 +68,7 @@ $hasReport = file_exists($reportFile);
 <div class="main">
     <!-- TOPBAR -->
     <div class="topbar">
-        <div class="topbar-title">KP Reports & Monthly Transmittal</div>
+        <div class="topbar-title">Monthly Report</div>
         <div class="topbar-right">
             <div class="user-pill">
                 <div class="user-avatar"><i class="uil uil-user"></i></div>
@@ -254,68 +99,7 @@ $hasReport = file_exists($reportFile);
                     <?php endfor; ?>
                 </select>
                 <button type="submit" class="btn-kp-primary"><i class="uil uil-search"></i> View Report</button>
-                <button type="button" onclick="window.print()" class="btn-kp-primary" style="background:#475569;"><i class="uil uil-print"></i> Print Report</button>
             </form>
-        </div>
-
-        <!-- Official Print Header (Visible only on print) -->
-        <div class="kp-print-header" style="display:none;">
-            <div style="text-align:center;margin-bottom:20px;font-family:serif;">
-                <div style="font-size:12pt;letter-spacing:1px;">Republic of the Philippines</div>
-                <div style="font-size:11pt;">Province of Samar • City of Catbalogan</div>
-                <div style="font-size:13pt;font-weight:bold;margin-top:2px;">BARANGAY MUÑOZ</div>
-                <div style="font-size:11pt;font-weight:bold;margin-top:4px;">OFFICE OF THE LUPONG TAGAPAMAYAPA</div>
-                <hr style="margin:10px 0;border:none;border-top:2px solid #000;">
-                <div style="font-size:14pt;font-weight:bold;margin-top:8px;">MONTHLY TRANSMITTAL OF FINAL REPORTS</div>
-                <div style="font-size:12pt;margin-top:2px;">Period: <?= htmlspecialchars($monthYearLabel) ?></div>
-            </div>
-        </div>
-
-        <?php if ($genSuccess): ?>
-        <div class="kp-info-box kp-info-success" style="margin-bottom:16px;">
-            <i class="uil uil-check-circle"></i>
-            <div><strong>Form #28 generated successfully!</strong>
-                <a href="kp_download.php?type=report&file=<?= urlencode(basename($reportFile)) ?>"
-                   class="btn-kp-sm" style="margin-left:12px;">
-                    <i class="uil uil-download-alt"></i> Download DOCX
-                </a>
-            </div>
-        </div>
-        <?php endif; ?>
-
-        <?php if ($genError): ?>
-        <div class="kp-info-box kp-info-danger" style="margin-bottom:16px;">
-            <i class="uil uil-exclamation-triangle"></i>
-            <div><strong>Error:</strong> <?= htmlspecialchars($genError) ?></div>
-        </div>
-        <?php endif; ?>
-
-        <!-- Monthly Transmittal Due Date Widget -->
-        <div class="kp-report-due-widget card-box" style="margin-bottom:20px;">
-            <div class="kp-report-due-inner">
-                <div class="kp-report-due-icon <?= $daysUntilDue <= 5 ? 'kp-due-urgent' : 'kp-due-normal' ?>">
-                    <i class="uil uil-calendar-alt"></i>
-                </div>
-                <div class="kp-report-due-text">
-                    <strong>Monthly Transmittal Report (KP Form #28)</strong>
-                    <p>
-                        <?php if ($daysUntilDue <= 0): ?>
-                            <span class="kp-due-overdue">⚠ Report for <?= date('F Y') ?> is <strong>OVERDUE</strong>. Due date was <?= date('F j, Y', strtotime($dueDate)) ?>.</span>
-                        <?php elseif ($daysUntilDue <= 5): ?>
-                            <span class="kp-due-warning">Due in <strong><?= $daysUntilDue ?> day<?= $daysUntilDue > 1 ? 's' : '' ?></strong> (<?= date('F j, Y', strtotime($dueDate)) ?>)</span>
-                        <?php else: ?>
-                            Due in <strong><?= $daysUntilDue ?> days</strong> (<?= date('F j, Y', strtotime($dueDate)) ?>)
-                        <?php endif; ?>
-                    </p>
-                </div>
-                <div class="kp-report-due-actions">
-                    <?php if ($existingReport): ?>
-                        <span class="kp-badge-success"><i class="uil uil-check"></i> Generated</span>
-                    <?php else: ?>
-                        <span class="kp-badge-warning"><i class="uil uil-clock"></i> Not Yet Generated</span>
-                    <?php endif; ?>
-                </div>
-            </div>
         </div>
 
         <!-- Stats Cards for Selected Month -->
@@ -323,7 +107,7 @@ $hasReport = file_exists($reportFile);
         <div class="stat-cards-row" style="margin-bottom:20px;">
             <div class="card-box stat-card">
                 <div>
-                    <div class="stat-label">Cases Filed</div>
+                    <div class="stat-label">KP Cases Filed</div>
                     <div class="stat-value"><?= $totalFiled ?></div>
                     <div class="stat-sub">In <?= $monthName ?></div>
                 </div>
@@ -332,22 +116,22 @@ $hasReport = file_exists($reportFile);
             <div class="card-box stat-card">
                 <div>
                     <div class="stat-label">Settled / Awarded</div>
-                    <div class="stat-value"><?= $totalSettled + $totalArbitrated ?></div>
+                    <div class="stat-value"><?= $totalSettled ?></div>
                     <div class="stat-sub">Amicable + Arbitration</div>
                 </div>
-                <div class="stat-icon stat-green"><i class="uil uil-handshake"></i></div>
+                <div class="stat-icon stat-green"><i class="uil uil-file-check-alt"></i></div>
             </div>
             <div class="card-box stat-card">
                 <div>
-                    <div class="stat-label">Certified to Court</div>
+                    <div class="stat-label">Certified / Dismissed</div>
                     <div class="stat-value"><?= $totalCertified ?></div>
-                    <div class="stat-sub">Filed / Dismissed</div>
+                    <div class="stat-sub">Incl. repudiated</div>
                 </div>
                 <div class="stat-icon stat-orange"><i class="uil uil-user-check"></i></div>
             </div>
             <div class="card-box stat-card">
                 <div>
-                    <div class="stat-label">Still Pending</div>
+                    <div class="stat-label">Pending</div>
                     <div class="stat-value"><?= $totalPending ?></div>
                     <div class="stat-sub">Ongoing process</div>
                 </div>
@@ -359,112 +143,55 @@ $hasReport = file_exists($reportFile);
         <?php if (!empty($statusBreakdown)): ?>
         <div class="card-box" style="margin-bottom:20px;">
             <div class="section-heading">KP Status Breakdown</div>
-            <div class="section-heading-sub">Cases filed in <?= htmlspecialchars($monthYearLabel) ?> by KP status</div>
-            <div class="kp-status-breakdown">
-                <?php foreach ($statusBreakdown as $sb): ?>
-                <div class="kp-sb-item">
-                    <span class="kp-sb-dot" style="background:<?= kp_status_color($sb['kp_status']) ?>"></span>
-                    <span class="kp-sb-label"><?= htmlspecialchars(kp_status_label($sb['kp_status'])) ?></span>
-                    <span class="kp-sb-count"><?= (int)$sb['cnt'] ?></span>
+            <div class="section-heading-sub">All complaints filed in <?= htmlspecialchars($monthYearLabel) ?>, including those still under review, by their current status</div>
+            <div class="kp-sb-list">
+                <?php foreach ($statusBreakdown as $sb):
+                    $sbStatus = (string)$sb['kp_status'];
+                    $sbColor = kp_status_color($sbStatus);
+                    $sbCount = (int)$sb['cnt'];
+                    $sbShare = $breakdownTotal > 0 ? round($sbCount / $breakdownTotal * 100) : 0;
+                    $sbStage = $stages[kp_status_stage($sbStatus)] ?? null;
+                ?>
+                <div class="kp-sb-row">
+                    <div class="kp-sb-icon" style="background:<?= $sbColor ?>1a;color:<?= $sbColor ?>;">
+                        <i class="uil <?= htmlspecialchars($sbStage['icon'] ?? 'uil-circle') ?>"></i>
+                    </div>
+                    <div class="kp-sb-main">
+                        <div class="kp-sb-top">
+                            <span class="kp-sb-label" title="<?= htmlspecialchars(kp_status_label($sbStatus)) ?>"><?= htmlspecialchars(kp_status_label($sbStatus)) ?></span>
+                            <span class="kp-sb-stage"><?= htmlspecialchars($sbStage['label'] ?? '') ?></span>
+                        </div>
+                        <div class="kp-sb-bar"><span style="width:<?= max($sbShare, 3) ?>%;background:<?= $sbColor ?>;"></span></div>
+                    </div>
+                    <div class="kp-sb-num">
+                        <strong><?= $sbCount ?></strong>
+                        <span><?= $sbShare ?>%</span>
+                    </div>
                 </div>
                 <?php endforeach; ?>
             </div>
         </div>
         <?php endif; ?>
 
-        <!-- Settled Cases List -->
-        <div class="card-box" style="margin-bottom:20px;">
-            <div class="section-heading">Settled / Awarded Cases</div>
-            <div class="section-heading-sub">Cases resolved through amicable settlement or arbitration award in <?= htmlspecialchars($monthYearLabel) ?></div>
-
-            <?php if (empty($settledCases) && empty($arbCases)): ?>
-                <div class="kp-empty-state"><i class="uil uil-folder-open"></i><p>No settled or awarded cases for this period.</p></div>
-            <?php else: ?>
-            <div class="table-wrap">
-                <table class="table-dashboard">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Case ID</th>
-                            <th>Complainant</th>
-                            <th>Respondent</th>
-                            <th>Type</th>
-                            <th>Status</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $n = 1; foreach ($settledCases as $sc): ?>
-                        <tr>
-                            <td><?= $n++ ?></td>
-                            <td><strong><?= htmlspecialchars($sc['case_id'] ?? '') ?></strong></td>
-                            <td><?= htmlspecialchars($sc['name'] ?? '') ?></td>
-                            <td><?= htmlspecialchars($sc['complained_person'] ?? '') ?></td>
-                            <td><span class="kp-badge-success">Settled</span></td>
-                            <td><?= htmlspecialchars(kp_status_label($sc['kp_status'] ?? '')) ?></td>
-                            <td><a href="case_process.php?id=<?= (int)$sc['id'] ?>" class="table-action"><i class="uil uil-eye"></i> View</a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                        <?php foreach ($arbCases as $ac): ?>
-                        <tr>
-                            <td><?= $n++ ?></td>
-                            <td><strong><?= htmlspecialchars($ac['case_id'] ?? '') ?></strong></td>
-                            <td><?= htmlspecialchars($ac['name'] ?? '') ?></td>
-                            <td><?= htmlspecialchars($ac['complained_person'] ?? '') ?></td>
-                            <td><span class="kp-badge-info">Arbitration Award</span></td>
-                            <td><?= htmlspecialchars(kp_status_label($ac['kp_status'] ?? '')) ?></td>
-                            <td><a href="case_process.php?id=<?= (int)$ac['id'] ?>" class="table-action"><i class="uil uil-eye"></i> View</a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-            <?php endif; ?>
-        </div>
-
-        <!-- Certified / Dismissed Cases -->
-        <div class="card-box" style="margin-bottom:20px;">
-            <div class="section-heading">Certified to Court / Dismissed</div>
-            <div class="section-heading-sub">Cases certified for court filing or dismissed in <?= htmlspecialchars($monthYearLabel) ?></div>
-
-            <?php if (empty($certifiedCases)): ?>
-                <div class="kp-empty-state"><i class="uil uil-folder-open"></i><p>No certified or dismissed cases for this period.</p></div>
-            <?php else: ?>
-            <div class="table-wrap">
-                <table class="table-dashboard">
-                    <thead>
-                        <tr>
-                            <th>#</th>
-                            <th>Case ID</th>
-                            <th>Complainant</th>
-                            <th>Respondent</th>
-                            <th>Disposition</th>
-                            <th>Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $n2 = 1; foreach ($certifiedCases as $cc): ?>
-                        <tr>
-                            <td><?= $n2++ ?></td>
-                            <td><strong><?= htmlspecialchars($cc['case_id'] ?? '') ?></strong></td>
-                            <td><?= htmlspecialchars($cc['name'] ?? '') ?></td>
-                            <td><?= htmlspecialchars($cc['complained_person'] ?? '') ?></td>
-                            <td><?= htmlspecialchars(kp_status_label($cc['kp_status'] ?? '')) ?></td>
-                            <td><a href="case_process.php?id=<?= (int)$cc['id'] ?>" class="table-action"><i class="uil uil-eye"></i> View</a></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-            <?php endif; ?>
-        </div>
-
-        <!-- KP Monitoring Form No. 1 (monthly report to DILG) -->
-        <div class="card-box kp-generate-form28">
-            <div class="section-heading">KP Monitoring Form No. 1 — Monthly Report</div>
+        <!-- Monthly report: KP Monitoring Form No. 1 -->
+        <div class="card-box kp-generate-form28" id="monitoring">
+            <div class="section-heading">Monthly Report &mdash; KP Monitoring Form No. 1</div>
             <div class="section-heading-sub">
                 KP cases filed in <?= htmlspecialchars($monthYearLabel) ?>, their nature and the action taken, in the official DILG format.
                 Prepared by the Barangay Secretary and attested by the Punong Barangay. Complaints not covered by KP are not included.
+            </div>
+            <div class="kp-form28-due">
+                <i class="uil uil-calendar-alt"></i>
+                The report for <strong><?= date('F Y') ?></strong> is prepared within the first 5 days of next month:
+                <?php if ($daysUntilDue < 0): ?>
+                    <span class="kp-due-overdue">overdue since <?= date('F j, Y', strtotime($dueDate)) ?></span>
+                <?php elseif ($daysUntilDue === 0): ?>
+                    <span class="kp-due-warning">due <strong>today</strong> (<?= date('M j', strtotime($dueDate)) ?>)</span>
+                <?php elseif ($daysUntilDue <= 5): ?>
+                    <span class="kp-due-warning">due in <strong><?= $daysUntilDue ?> day<?= $daysUntilDue > 1 ? 's' : '' ?></strong> (<?= date('M j', strtotime($dueDate)) ?>)</span>
+                <?php else: ?>
+                    due in <strong><?= $daysUntilDue ?> days</strong> (<?= date('M j', strtotime($dueDate)) ?>)
+                <?php endif; ?>
             </div>
 
             <div class="kp-form28-summary">
@@ -473,7 +200,7 @@ $hasReport = file_exists($reportFile);
                     <span>KP cases filed: <strong><?= count($monitoring['rows']) ?></strong></span>
                 </div>
                 <div class="kp-f28-item">
-                    <i class="uil uil-handshake kp-f28-icon-green"></i>
+                    <i class="uil uil-file-check-alt kp-f28-icon-green"></i>
                     <span>Settled / awarded: <strong><?= $monitoring['totals']['mediation'] + $monitoring['totals']['conciliation'] + $monitoring['totals']['arbitration'] ?></strong></span>
                 </div>
                 <div class="kp-f28-item">
@@ -488,51 +215,8 @@ $hasReport = file_exists($reportFile);
 
             <div class="kp-form28-actions">
                 <a href="kp_monitoring_report.php?month=<?= $selMonth ?>&amp;year=<?= $selYear ?>" class="btn-kp-primary btn-kp-lg">
-                    <i class="uil uil-file-download-alt"></i> Download Monitoring Form (<?= htmlspecialchars($monthYearLabel) ?>)
+                    <i class="uil uil-file-download-alt"></i> Download Monthly Report (<?= htmlspecialchars($monthYearLabel) ?>)
                 </a>
-            </div>
-        </div>
-
-        <!-- Generate Form #28 -->
-        <div class="card-box kp-generate-form28">
-            <div class="section-heading">Generate KP Form #28 — Monthly Transmittal</div>
-            <div class="section-heading-sub">
-                Generate the official Monthly Transmittal of Final Reports for <?= htmlspecialchars($monthYearLabel) ?>.
-                This will auto-populate all settled, awarded, and certified cases.
-            </div>
-
-            <div class="kp-form28-summary">
-                <div class="kp-f28-item">
-                    <i class="uil uil-handshake kp-f28-icon-green"></i>
-                    <span>Settled: <strong><?= $totalSettled ?></strong></span>
-                </div>
-                <div class="kp-f28-item">
-                    <i class="uil uil-user-check kp-f28-icon-purple"></i>
-                    <span>Arbitration Awards: <strong><?= $totalArbitrated ?></strong></span>
-                </div>
-                <div class="kp-f28-item">
-                    <i class="uil uil-file-upload-alt kp-f28-icon-orange"></i>
-                    <span>Certified to Court: <strong><?= $totalCertified ?></strong></span>
-                </div>
-            </div>
-
-            <div class="kp-form28-actions">
-                <form method="POST" style="display:inline;">
-                    <input type="hidden" name="action" value="generate_form28">
-                    <input type="hidden" name="month" value="<?= $selMonth ?>">
-                    <input type="hidden" name="year" value="<?= $selYear ?>">
-                    <button type="submit" class="btn-kp-primary btn-kp-lg">
-                        <i class="uil uil-file-download-alt"></i>
-                        <?= $hasReport ? 'Re-generate' : 'Generate' ?> Form #28 (<?= $monthYearLabel ?>)
-                    </button>
-                </form>
-
-                <?php if ($hasReport): ?>
-                <a href="kp_download.php?type=report&file=<?= urlencode(basename($reportFile)) ?>"
-                   class="btn-kp-success btn-kp-lg">
-                    <i class="uil uil-download-alt"></i> Download Existing Report
-                </a>
-                <?php endif; ?>
             </div>
         </div>
 
@@ -603,18 +287,18 @@ $hasReport = file_exists($reportFile);
 }
 
 /* Status Breakdown */
-.kp-status-breakdown {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; padding: 12px 0;
-}
-.kp-sb-item {
-    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
-    background: #f8fafc; border-radius: 8px; font-size: 13px;
-}
-.kp-sb-dot {
-    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
-}
-.kp-sb-label { flex: 1; color: #334155; }
-.kp-sb-count { font-weight: 700; color: #1e293b; font-size: 15px; }
+.kp-sb-list { display: flex; gap: 10px; padding-top: 12px; overflow-x: auto; }
+.kp-sb-row { flex: 1 1 0; min-width: 190px; display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: #f8fafc; border: 1px solid #eef2f7; border-radius: 12px; }
+.kp-sb-icon { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+.kp-sb-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.kp-sb-top { display: flex; flex-direction: column; }
+.kp-sb-label { font-size: 12.5px; font-weight: 600; color: #1e293b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kp-sb-stage { font-size: 10px; font-weight: 600; letter-spacing: .4px; text-transform: uppercase; color: #94a3b8; }
+.kp-sb-bar { height: 5px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+.kp-sb-bar span { display: block; height: 100%; border-radius: 999px; }
+.kp-sb-num { display: flex; flex-direction: column; align-items: flex-end; min-width: 34px; }
+.kp-sb-num strong { font-size: 17px; color: #1e293b; line-height: 1.1; }
+.kp-sb-num span { font-size: 11px; color: #64748b; }
 
 /* Empty State */
 .kp-empty-state {
@@ -624,7 +308,9 @@ $hasReport = file_exists($reportFile);
 .kp-empty-state p { margin: 0; font-size: 14px; }
 
 /* Form 28 Generate Section */
-.kp-generate-form28 { border: 2px dashed #e2e8f0; }
+.kp-generate-form28 { border: 2px dashed #e2e8f0; scroll-margin-top: 80px; margin-bottom: 18px; }
+.kp-generate-form28 a.btn-kp-primary, .kp-generate-form28 a.btn-kp-success { text-decoration: none; }
+.kp-form28-due { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12.5px; color: #475569; background: #fffbeb; border: 1px solid #fde68a; border-radius: 10px; padding: 8px 12px; margin: 12px 0 4px; }
 .kp-form28-summary {
     display: flex; gap: 24px; padding: 16px 0; flex-wrap: wrap;
 }

@@ -8,255 +8,78 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 require_once '../config/database.php';
 require_once '../config/kp.php';
 require_once '../config/barangays.php';
-require_once '../config/case_types.php';
+require_once __DIR__ . '/../includes/case_intake_form.php';
+
+// Same fields, rules and change log as the barangay's Edit Case page
+// (barangay/update_case.php); admins may edit cases of any barangay.
 
 $caseIdParam = trim((string)($_GET['id'] ?? $_POST['id'] ?? ''));
 $error = '';
-$toastType = '';
-$toastTitle = '';
-$toastMessage = '';
 $case = null;
-
-// Check if page loaded after successful save
-if (isset($_GET['saved']) && $_GET['saved'] === '1') {
-    $toastType = 'success';
-    $toastTitle = 'Case Updated';
-    $toastMessage = 'Case details were saved successfully.';
-}
-
-$caseColumns = [];
-$colResult = $conn->query("SHOW COLUMNS FROM cases");
-if ($colResult) {
-    while ($col = $colResult->fetch_assoc()) {
-        $caseColumns[] = $col['Field'];
-    }
-}
-
-$hasColumn = static function (string $column) use ($caseColumns): bool {
-    return in_array($column, $caseColumns, true);
-};
-
-$idColumn       = $hasColumn('id') ? 'id' : ($hasColumn('case_id') ? 'case_id' : null);
-$displayIdCol   = $hasColumn('case_id') ? 'case_id' : ($hasColumn('id') ? 'id' : null);
-$residentColumn = $hasColumn('resident_name') ? 'resident_name' : ($hasColumn('name') ? 'name' : null);
-$complainedColumn = $hasColumn('complained_person') ? 'complained_person' : ($hasColumn('respondent_name') ? 'respondent_name' : ($hasColumn('against_person') ? 'against_person' : null));
-$typeColumn     = $hasColumn('case_type') ? 'case_type' : ($hasColumn('type') ? 'type' : null);
-$statusColumn   = $hasColumn('status') ? 'status' : null;
-$barangayColumn = $hasColumn('barangay') ? 'barangay' : null;
-$dateColumn     = $hasColumn('created_at') ? 'created_at' : ($hasColumn('date_submitted') ? 'date_submitted' : ($hasColumn('updated_at') ? 'updated_at' : null));
-$descriptionColumn = $hasColumn('description') ? 'description' : ($hasColumn('details') ? 'details' : ($hasColumn('remarks') ? 'remarks' : ($hasColumn('notes') ? 'notes' : null)));
 
 if ($caseIdParam === '') {
     $error = 'Missing case id.';
-} elseif ($idColumn === null) {
-    $error = 'Case table is missing an identifier column.';
 } else {
-    $selectFields = [];
-    if ($displayIdCol) { $selectFields[] = "$displayIdCol AS display_case_id"; }
-    if ($residentColumn) { $selectFields[] = "$residentColumn AS resident_name"; }
-    if ($complainedColumn) { $selectFields[] = "$complainedColumn AS complained_person"; }
-    if ($typeColumn) { $selectFields[] = "$typeColumn AS case_type"; }
-    if ($statusColumn) { $selectFields[] = "$statusColumn AS case_status"; }
-    if ($hasColumn('kp_status')) { $selectFields[] = "kp_status AS case_kp_status"; }
-    if ($barangayColumn) { $selectFields[] = "$barangayColumn AS case_barangay"; }
-    if ($descriptionColumn) { $selectFields[] = "$descriptionColumn AS case_description"; }
-    if ($dateColumn) { $selectFields[] = "$dateColumn AS case_date"; }
-
-    if (!$selectFields) {
-        $error = 'No readable fields found in case table.';
-    } else {
-        $sql = 'SELECT ' . implode(', ', $selectFields) . " FROM cases WHERE $idColumn = ? LIMIT 1";
-        $stmt = $conn->prepare($sql);
-        if ($stmt) {
-            $stmt->bind_param('s', $caseIdParam);
-            $stmt->execute();
-            $res = $stmt->get_result();
-            $case = $res ? $res->fetch_assoc() : null;
-            $stmt->close();
-        }
-        if (!$case) {
-            $error = 'Case not found.';
-        }
+    // Accepts the row id (56) or the case number (C-0056).
+    $stmt = $conn->prepare('SELECT * FROM cases WHERE (id = ? OR case_id = ?) AND archived_at IS NULL LIMIT 1');
+    $caseIdInt = ctype_digit($caseIdParam) ? (int)$caseIdParam : 0;
+    $stmt->bind_param('is', $caseIdInt, $caseIdParam);
+    $stmt->execute();
+    $case = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$case) {
+        $error = 'Case not found.';
     }
 }
 
-$form = [
-    'resident_name' => trim((string)($case['resident_name'] ?? '')),
-    'complained_person' => trim((string)($case['complained_person'] ?? '')),
-    'case_type' => trim((string)($case['case_type'] ?? '')),
-    'case_status' => !empty($case['case_kp_status']) ? trim((string)$case['case_kp_status']) : trim((string)($case['case_status'] ?? 'Pending')),
-    'case_kp_status' => trim((string)($case['case_kp_status'] ?? '')),
-    'case_barangay' => 'Barangay Muñoz',
-    'case_description' => trim((string)($case['case_description'] ?? '')),
+$caseId = (int)($case['id'] ?? 0);
+$actor = [
+    'name' => (string)($_SESSION['name'] ?? 'Admin'),
+    'role' => 'Administrator',
+    'id'   => (int)($_SESSION['user_id'] ?? 0),
 ];
+$currentStatus = !empty($case['kp_status']) ? (string)$case['kp_status'] : (string)($case['status'] ?? 'Pending');
+$statusChoices = $case ? kp_correction_status_options($currentStatus) : [];
 
-// Normalize barangay to match valid options (case-insensitive)
-if ($form['case_barangay'] !== '') {
-    $validBarangays = gabaybatas_get_barangays();
-    foreach ($validBarangays as $validBrgy) {
-        if (strtolower($form['case_barangay']) === strtolower($validBrgy)) {
-            $form['case_barangay'] = $validBrgy;
-            break;
-        }
+$state = gabaybatas_case_edit_state($case ?? []);
+$freeText = $state['free_text'];
+$form = $state['saved'];
+$errors = [];
+$statusError = '';
+$action = (string)($_POST['action'] ?? '');
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $case && $action === 'details') {
+    $form = gabaybatas_intake_from_post();
+    $errors = gabaybatas_case_edit_save($conn, $case, $state, $form, $actor);
+    if (!$errors) {
+        header('Location: edit_case.php?id=' . $caseId . '&saved=1');
+        exit();
     }
 }
 
-// Corrections are limited to the statuses the KP procedure allows next.
-$originalStatus = (string)($form['case_status'] ?? 'Pending');
-$statusChoices = kp_correction_status_options($originalStatus);
-$statusOptions = array_keys($statusChoices);
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
-    $form['resident_name'] = trim((string)($_POST['resident_name'] ?? $form['resident_name']));
-    $form['complained_person'] = trim((string)($_POST['complained_person'] ?? $form['complained_person']));
-    $form['case_type'] = trim((string)($_POST['case_type'] ?? $form['case_type']));
-    $form['case_status'] = trim((string)($_POST['status'] ?? $form['case_status']));
-    $form['case_barangay'] = 'Barangay Muñoz';
-    $form['case_description'] = trim((string)($_POST['description'] ?? $form['case_description']));
-
-    // Normalize barangay to match valid options (case-insensitive)
-    if ($form['case_barangay'] !== '') {
-        $validBarangays = gabaybatas_get_barangays();
-        foreach ($validBarangays as $validBrgy) {
-            if (strtolower($form['case_barangay']) === strtolower($validBrgy)) {
-                $form['case_barangay'] = $validBrgy;
-                break;
-            }
-        }
-    }
-
-    $changeReason = trim((string)($_POST['change_reason'] ?? ''));
-
-    if ($statusColumn && !in_array($form['case_status'], $statusOptions, true)) {
-        $error = 'This status change is not allowed under the KP procedure.';
-    } elseif ($statusColumn && $form['case_status'] !== $originalStatus && $changeReason === '') {
-        $error = 'Please state the reason for changing the status.';
-    } else {
-        $setParts = [];
-        $types = '';
-        $values = [];
-
-        $current = [
-            'resident_name' => trim((string)($case['resident_name'] ?? '')),
-            'complained_person' => trim((string)($case['complained_person'] ?? '')),
-            'case_type' => trim((string)($case['case_type'] ?? '')),
-            'case_status' => trim((string)($case['case_status'] ?? '')),
-            'case_barangay' => trim((string)($case['case_barangay'] ?? '')),
-            'case_description' => trim((string)($case['case_description'] ?? '')),
-        ];
-
-        // Normalize barangay in current values to match form values (case-insensitive)
-        if ($current['case_barangay'] !== '') {
-            $validBarangays = gabaybatas_get_barangays();
-            foreach ($validBarangays as $validBrgy) {
-                if (strtolower($current['case_barangay']) === strtolower($validBrgy)) {
-                    $current['case_barangay'] = $validBrgy;
-                    break;
-                }
-            }
-        }
-
-        if ($residentColumn && $form['resident_name'] !== $current['resident_name']) {
-            $setParts[] = "$residentColumn = ?";
-            $types .= 's';
-            $values[] = $form['resident_name'];
-        }
-        if ($complainedColumn && $form['complained_person'] !== $current['complained_person']) {
-            $setParts[] = "$complainedColumn = ?";
-            $types .= 's';
-            $values[] = $form['complained_person'];
-        }
-        if ($typeColumn && $form['case_type'] !== $current['case_type']) {
-            $setParts[] = "$typeColumn = ?";
-            $types .= 's';
-            $values[] = $form['case_type'];
-        }
-        if ($statusColumn && $form['case_status'] !== $originalStatus) {
-            if (array_key_exists($form['case_status'], kp_statuses())) {
-                $parentSt = kp_status_to_parent($form['case_status']);
-                $kpSt = $form['case_status'];
-            } else {
-                $parentSt = in_array($form['case_status'], ['Pending', 'In Progress', 'Resolved'], true) ? $form['case_status'] : 'Pending';
-                $kpSt = null;
-            }
-            $setParts[] = "$statusColumn = ?";
-            $types .= 's';
-            $values[] = $parentSt;
-            if ($hasColumn('kp_status')) {
-                $setParts[] = "kp_status = ?";
-                $types .= 's';
-                $values[] = $kpSt;
-            }
-            $numId = (int)($case['row_id'] ?? 0);
-            if ($numId > 0 && function_exists('kp_log_event')) {
-                $actorId = (int)($_SESSION['user_id'] ?? 0);
-                $actorRole = (string)($_SESSION['role'] ?? 'admin');
-                $actorName = (string)($_SESSION['name'] ?? 'Admin');
-                $stLabel = kp_status_label($kpSt ?: $parentSt);
-                $eventStage = $kpSt ? kp_status_stage($kpSt) : 'intake';
-                $eventStatus = $kpSt ?: strtolower(str_replace(' ', '_', $parentSt));
-                $eventDetails = json_encode([
-                    'parent_status' => $parentSt,
-                    'kp_status' => $kpSt,
-                    'updated_by' => $actorName,
-                    'actor_role' => $actorRole,
-                    'reason' => $changeReason,
-                ], JSON_UNESCAPED_UNICODE);
-                kp_log_event($conn, $numId, $eventStage, $eventStatus, 'status_changed', "Case status updated to '{$stLabel}' by {$actorName}", $eventDetails ?: '', $actorId);
-            }
-        }
-        if ($barangayColumn && $form['case_barangay'] !== $current['case_barangay']) {
-            $setParts[] = "$barangayColumn = ?";
-            $types .= 's';
-            $values[] = $form['case_barangay'];
-        }
-        if ($descriptionColumn && $form['case_description'] !== $current['case_description']) {
-            $setParts[] = "$descriptionColumn = ?";
-            $types .= 's';
-            $values[] = $form['case_description'];
-        }
-        if ($hasColumn('updated_at')) {
-            $setParts[] = 'updated_at = NOW()';
-        }
-
-        if (!$setParts || (count($setParts) === 1 && $setParts[0] === 'updated_at = NOW()')) {
-            $toastType = 'info';
-            $toastTitle = 'No Changes';
-            $toastMessage = 'No fields were modified, so nothing was updated.';
-        } else {
-            $sql = 'UPDATE cases SET ' . implode(', ', $setParts) . " WHERE $idColumn = ?";
-            $types .= 's';
-            $values[] = $caseIdParam;
-
-            $stmt = $conn->prepare($sql);
-            if (!$stmt) {
-                $error = 'Unable to prepare case update query.';
-            } else {
-                $stmt->bind_param($types, ...$values);
-                if ($stmt->execute()) {
-                    $toastType = 'success';
-                    $toastTitle = 'Case Updated';
-                    $toastMessage = 'Case details were saved successfully.';
-
-                    $case['resident_name'] = $form['resident_name'];
-                    $case['complained_person'] = $form['complained_person'];
-                    $case['case_type'] = $form['case_type'];
-                    $case['case_status'] = $form['case_status'];
-                    $case['case_barangay'] = $form['case_barangay'];
-                    $case['case_description'] = $form['case_description'];
-                    
-                    // Redirect to prevent POST resubmission
-                    $stmt->close();
-                    header('Location: edit_case.php?id=' . urlencode($caseIdParam) . '&saved=1');
-                    exit();
-                } else {
-                    $error = 'Unable to update this case.';
-                    $stmt->close();
-                }
-            }
-        }
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $case && $action === 'status') {
+    $statusError = gabaybatas_case_status_correct(
+        $conn, $case, trim((string)($_POST['status'] ?? '')), (string)($_POST['change_reason'] ?? ''), $actor
+    );
+    if ($statusError === '') {
+        header('Location: edit_case.php?id=' . $caseId . '&saved=1');
+        exit();
     }
 }
+
+$documentCount = 0;
+if ($case) {
+    $dc = $conn->prepare('SELECT COUNT(*) FROM kp_documents WHERE case_id = ?');
+    $dc->bind_param('i', $caseId);
+    $dc->execute();
+    $documentCount = (int)$dc->get_result()->fetch_row()[0];
+    $dc->close();
+}
+$dateTs = strtotime((string)($case['date_submitted'] ?? ''));
+$dateDisplay = $dateTs ? date('M d, Y', $dateTs) : 'N/A';
+$displayCaseId = (string)($case['case_id'] ?? '') ?: ('C-' . str_pad((string)$caseId, 4, '0', STR_PAD_LEFT));
+$statusColor = kp_status_color($currentStatus);
+$justSaved = ($_GET['saved'] ?? '') === '1';
 ?>
 <?php include('../includes/header_admin.php'); ?>
 <?php include('../includes/sidebar_admin.php'); ?>
@@ -273,161 +96,138 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error === '' && $case !== null) {
             <div class="user-pill">
                 <div class="user-avatar"><i class="uil uil-user"></i></div>
                 <div class="user-text">
-                    <strong><?= htmlspecialchars($_SESSION['name'] ?? 'Admin') ?></strong>
+                    <strong><?= htmlspecialchars($actor['name']) ?></strong>
                     <span>Administrator</span>
                 </div>
             </div>
         </div>
     </div>
 
-    <div class="page-body ec-body">
-        <div class="ec-head fade-up" style="--d:0s">
-            <p class="ec-sub">Update case information, status progression, and administrative details.</p>
-            <a href="all_cases.php" class="ec-back-btn"><i class="uil uil-arrow-left"></i> Back to All Cases</a>
+    <div class="page-body acs-body">
+        <div class="acs-head">
+            <p class="acs-sub">
+                <?php if ($case): ?>
+                    Correct the details of <strong><?= htmlspecialchars($displayCaseId) ?></strong>
+                    (<?= htmlspecialchars((string)($case['barangay'] ?? '')) ?>). The statement on KP Form No. 7 is rebuilt from your corrections.
+                <?php else: ?>
+                    Correct the details of a case.
+                <?php endif; ?>
+            </p>
+            <a href="all_cases.php" class="acs-back-btn"><i class="uil uil-arrow-left"></i> Back to Manage Cases</a>
         </div>
 
-        <div class="ec-card fade-up" style="--d:.08s">
-            <?php if ($error !== ''): ?>
-                <div class="ec-alert error"><i class="uil uil-exclamation-circle"></i> <?= htmlspecialchars($error) ?></div>
+        <?php if ($error !== ''): ?>
+            <div class="acs-alert error"><i class="uil uil-exclamation-circle"></i> <?= htmlspecialchars($error) ?></div>
+        <?php else: ?>
+
+            <?php if ($errors): ?>
+                <div class="acs-alert error"><i class="uil uil-exclamation-circle"></i>
+                    <?= htmlspecialchars($errors['form'] ?? 'Please correct the highlighted fields.') ?>
+                </div>
+            <?php endif; ?>
+            <?php if ($documentCount > 0): ?>
+                <div class="acs-alert info"><i class="uil uil-info-circle"></i>
+                    KP forms were already generated for this case. After correcting the details, the barangay should generate the forms again so they show the corrected information.
+                </div>
             <?php endif; ?>
 
-            <?php if ($error === '' && $case !== null): ?>
-                <form method="POST" id="editCaseForm" class="ec-form">
-                    <input type="hidden" name="id" value="<?= htmlspecialchars($caseIdParam) ?>">
+            <form method="POST" class="acs-form" id="editCaseForm" novalidate>
+                <input type="hidden" name="id" value="<?= $caseId ?>">
+                <input type="hidden" name="action" value="details">
+                <?php gabaybatas_intake_render($form, $errors, [
+                    'date_filed'  => $dateDisplay,
+                    'free_text'   => $freeText,
+                    'status_html' => '<div class="acs-status" style="border-color:' . $statusColor . '55;background:' . $statusColor . '12;color:' . $statusColor . ';">'
+                        . '<span class="acs-status-dot" style="background:' . $statusColor . ';"></span> ' . htmlspecialchars(kp_status_label($currentStatus)) . '</div>'
+                        . '<small class="acs-hint">The barangay moves the case through Case Process; correct a wrong status below.</small>',
+                ]); ?>
 
-                    <div class="ec-grid">
-                        <div class="ec-field">
-                            <label>Case ID</label>
-                            <input type="text" value="<?= htmlspecialchars((string)($case['display_case_id'] ?? $caseIdParam)) ?>" readonly>
-                        </div>
-                        <div class="ec-field">
-                            <label>Date</label>
-                            <input type="text" value="<?= htmlspecialchars((string)($case['case_date'] ?? 'N/A')) ?>" readonly>
-                        </div>
+                <div class="acs-actions">
+                    <a href="all_cases.php" class="acs-cancel">Cancel</a>
+                    <button type="submit" class="acs-save"><i class="uil uil-save"></i> Save Corrections</button>
+                </div>
+            </form>
 
-                        <div class="ec-field">
-                            <label>Resident Name</label>
-                            <input type="text" name="resident_name" value="<?= htmlspecialchars($form['resident_name']) ?>" <?= $residentColumn ? '' : 'readonly' ?>>
-                        </div>
-                        <div class="ec-field">
-                            <label>Person Being Complained</label>
-                            <input type="text" name="complained_person" value="<?= htmlspecialchars($form['complained_person']) ?>" <?= $complainedColumn ? '' : 'readonly' ?>>
-                        </div>
-                        <div class="ec-field">
-                            <label>Case Type</label>
-                            <?php $caseTypes = gabaybatas_case_types(); ?>
-                            <?php if ($typeColumn): ?>
-                            <select name="case_type">
-                                <?php if ($form['case_type'] !== '' && !in_array($form['case_type'], $caseTypes, true)): ?>
-                                <option value="<?= htmlspecialchars($form['case_type']) ?>" selected><?= htmlspecialchars($form['case_type']) ?> (Current)</option>
-                                <?php endif; ?>
-                                <?php foreach ($caseTypes as $caseTypeOption): ?>
-                                <option value="<?= htmlspecialchars($caseTypeOption) ?>" <?= $form['case_type'] === $caseTypeOption ? 'selected' : '' ?>><?= htmlspecialchars($caseTypeOption) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <?php else: ?>
-                            <input type="text" name="case_type" value="<?= htmlspecialchars($form['case_type']) ?>" readonly>
-                            <?php endif; ?>
-                        </div>
-
-                        <div class="ec-field">
-                            <label>Status</label>
-                            <select name="status" <?= $statusColumn ? '' : 'disabled' ?>>
-                                <?php foreach ($statusChoices as $value => $label): ?>
-                                <option value="<?= htmlspecialchars($value) ?>" <?= $form['case_status'] === $value ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                            <small style="display:block;margin-top:6px;color:#64748b;">Only the next steps allowed by the KP procedure are listed.</small>
-                        </div>
-
-                        <div class="ec-field">
-                            <label>Reason for status change</label>
-                            <textarea name="change_reason" rows="2" placeholder="Required when changing the status"></textarea>
-                        </div>
-
-                        <div class="ec-field ec-field-full">
-                            <label>Barangay</label>
-                            <input type="text" value="Barangay Muñoz" readonly <?= $barangayColumn ? '' : 'disabled' ?>>
-                            <?php if ($barangayColumn): ?><input type="hidden" name="barangay" value="Barangay Muñoz"><?php endif; ?>
-                        </div>
-
-                        <div class="ec-field ec-field-full">
-                            <label>Description / Notes</label>
-                            <textarea name="description" rows="6" <?= $descriptionColumn ? '' : 'readonly' ?>><?= htmlspecialchars($form['case_description']) ?></textarea>
-                        </div>
+            <!-- Status correction (for mistakes only) -->
+            <form method="POST" class="card-box acs-card uc-status-card" id="statusCaseForm">
+                <input type="hidden" name="id" value="<?= $caseId ?>">
+                <input type="hidden" name="action" value="status">
+                <div class="acs-card-title"><i class="uil uil-exchange"></i> Status Correction</div>
+                <p class="acs-sub" style="margin-bottom:12px;">Use this only to correct a wrong status. Hearings, settlements and certifications are recorded by the barangay in Case Process.</p>
+                <?php if ($statusError !== ''): ?>
+                    <div class="acs-alert error"><i class="uil uil-exclamation-circle"></i> <?= htmlspecialchars($statusError) ?></div>
+                <?php endif; ?>
+                <div class="acs-grid">
+                    <div class="acs-field">
+                        <label>New Status</label>
+                        <select name="status">
+                            <?php foreach ($statusChoices as $value => $label): ?>
+                            <option value="<?= htmlspecialchars($value) ?>" <?= $currentStatus === $value ? 'selected' : '' ?>><?= htmlspecialchars($label) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="acs-hint">Only the next steps allowed by the KP procedure are listed.</small>
                     </div>
-
-                    <div class="ec-actions">
-                        <a href="all_cases.php" class="ec-cancel">Cancel</a>
-                        <button type="submit" class="ec-save"><i class="uil uil-save"></i> Save Changes</button>
+                    <div class="acs-field">
+                        <label>Reason for the change <span>*</span></label>
+                        <textarea name="change_reason" rows="2" placeholder="Required when changing the status"></textarea>
                     </div>
-                </form>
-            <?php endif; ?>
-        </div>
+                </div>
+                <div class="acs-actions" style="margin-top:12px;">
+                    <button type="submit" class="acs-save uc-status-btn"><i class="uil uil-exchange"></i> Change Status</button>
+                </div>
+            </form>
+        <?php endif; ?>
     </div>
 </div>
 
+<?php if ($case): ?>
+<?php gabaybatas_intake_assets('editCaseForm'); ?>
 <script>
-const ecObserver = new IntersectionObserver(entries => {
-    entries.forEach(en => {
-        if (en.isIntersecting) {
-            en.target.classList.add('visible');
-            ecObserver.unobserve(en.target);
-        }
-    });
-}, { threshold: 0.1 });
-document.querySelectorAll('.fade-up').forEach(el => ecObserver.observe(el));
-
-const editCaseForm = document.getElementById('editCaseForm');
-if (editCaseForm) {
-    let confirmed = false;
-    editCaseForm.addEventListener('submit', async function (event) {
-        if (confirmed) return;
-        event.preventDefault();
-
-        if (window.AdminConfirm) {
-            const ok = await window.AdminConfirm.confirm({
-                title: 'Save Case Changes?',
-                message: 'This will update the selected case details.',
-                confirmText: 'Save Changes',
-                cancelText: 'Cancel'
-            });
+(function () {
+    function confirmBeforeSubmit(form, options, validate) {
+        let confirmed = false;
+        form.addEventListener('submit', async function (event) {
+            if (confirmed) return;
+            event.preventDefault();
+            if (validate && !form.checkValidity()) {
+                form.reportValidity();
+                return;
+            }
+            const ok = window.AdminConfirm
+                ? await window.AdminConfirm.confirm(options)
+                : window.confirm(options.title + '\n\n' + options.message);
             if (!ok) return;
-        }
+            confirmed = true;
+            form.submit();
+        });
+    }
+    confirmBeforeSubmit(document.getElementById('editCaseForm'), {
+        title: 'Save corrections?',
+        message: 'The case details and the statement on KP Form No. 7 will be updated. Each change, with its old and new value, is recorded in the case timeline.',
+        confirmText: 'Save Corrections',
+        cancelText: 'Review Again'
+    }, true);
+    confirmBeforeSubmit(document.getElementById('statusCaseForm'), {
+        title: 'Change the case status?',
+        message: 'Use this only to correct a mistake. The change and your reason are recorded in the case timeline.',
+        confirmText: 'Change Status',
+        cancelText: 'Cancel'
+    }, false);
 
-        confirmed = true;
-        editCaseForm.submit();
-    });
-}
-
-<?php if ($toastType !== ''): ?>
-if (window.AdminToast) {
-    window.AdminToast.show('<?= htmlspecialchars($toastType, ENT_QUOTES) ?>', '<?= htmlspecialchars($toastTitle, ENT_QUOTES) ?>', '<?= htmlspecialchars($toastMessage, ENT_QUOTES) ?>');
-}
-<?php endif; ?>
+    <?php if ($justSaved): ?>
+    if (window.AdminToast) {
+        window.AdminToast.show('success', 'Case Updated', 'Your corrections were saved and recorded in the case timeline.');
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.delete('saved');
+    window.history.replaceState(null, '', url.pathname + url.search);
+    <?php endif; ?>
+})();
 </script>
+<?php endif; ?>
 
 <style>
-.ec-body { padding: 24px 28px 40px; }
-.fade-up { opacity: 0; transform: translateY(20px); transition: opacity .5s ease var(--d,0s), transform .5s ease var(--d,0s); }
-.fade-up.visible { opacity: 1; transform: none; }
-.ec-head { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:14px; }
-.ec-sub { font-size:12.5px; color:var(--text-sub); margin:0; }
-.ec-back-btn { display:inline-flex; align-items:center; gap:6px; text-decoration:none; font-size:12.5px; font-weight:600; color:#1d4ed8; background:#eff6ff; border:1px solid #dbeafe; border-radius:9px; padding:8px 13px; }
-.ec-card { background:#fff; border:1px solid #f1f5f9; border-radius:16px; box-shadow:0 1px 4px rgba(0,0,0,.04); padding:20px; }
-.ec-alert { display:flex; align-items:center; gap:8px; border-radius:10px; padding:10px 12px; font-size:12.5px; margin-bottom:12px; }
-.ec-alert.error { background:#fff1f2; border:1px solid #fecdd3; color:#be123c; }
-.ec-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
-.ec-field { display:flex; flex-direction:column; gap:6px; }
-.ec-field label { font-size:11px; letter-spacing:.6px; text-transform:uppercase; color:#6b7280; font-weight:700; }
-.ec-field input, .ec-field select, .ec-field textarea { width:100%; background:#fafbff; border:1px solid #e2e8f0; border-radius:10px; padding:10px 12px; font-size:13px; color:#1f2937; outline:none; }
-.ec-field input:focus, .ec-field select:focus, .ec-field textarea:focus { border-color:#3b82f6; }
-.ec-field input[readonly], .ec-field textarea[readonly] { background:#f8fafc; color:#64748b; }
-.ec-field-full { grid-column:1 / -1; }
-.ec-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
-.ec-cancel, .ec-save { display:inline-flex; align-items:center; justify-content:center; gap:6px; border-radius:9px; padding:9px 14px; font-size:12.5px; font-weight:600; text-decoration:none; }
-.ec-cancel { border:1px solid #e2e8f0; color:#475569; background:#fff; }
-.ec-save { border:none; background:#1d4ed8; color:#fff; cursor:pointer; }
-.ec-save:hover { background:#1e40af; }
-@media (max-width:900px) { .ec-body{padding:16px;} .ec-head{flex-direction:column;align-items:flex-start;} .ec-grid{grid-template-columns:1fr;} }
+.uc-status-card{margin-top:22px;border-top:3px solid #f59e0b;}
+.uc-status-btn{background:#b45309;}
+.uc-status-btn:hover{background:#92400e;}
 </style>

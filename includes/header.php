@@ -420,6 +420,7 @@
             width: 6px; height: 6px;
             border-radius: 50%;
             flex-shrink: 0;
+            background: currentColor;
         }
 
         .pending  { background: var(--orange-bg); color: var(--orange); }
@@ -696,105 +697,13 @@
         .admin-confirm-btn { border: 1px solid #dbe3ef; background: #fff; color: #475569; border-radius: 9px; padding: 8px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
         .admin-confirm-btn.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
         .admin-confirm-btn.primary:hover { background: var(--navy-dark); border-color: var(--navy-dark); }
+        .admin-confirm-overlay.danger .admin-confirm-icon { background: #fee2e2; color: #b91c1c; }
+        .admin-confirm-overlay.danger .admin-confirm-btn.primary { background: #dc2626; border-color: #dc2626; }
+        .admin-confirm-overlay.danger .admin-confirm-btn.primary:hover { background: #b91c1c; border-color: #b91c1c; }
 
-        .notif-popover {
-            position: absolute;
-            top: calc(100% + 10px);
-            right: 0;
-            width: 320px;
-            background: #fff;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            box-shadow: 0 14px 28px rgba(15,23,42,.14);
-            overflow: hidden;
-            z-index: 120;
-            opacity: 0;
-            transform: translateY(-6px);
-            pointer-events: none;
-            transition: opacity .18s ease, transform .18s ease;
-        }
-
-        .notif-popover.open {
-            opacity: 1;
-            transform: translateY(0);
-            pointer-events: auto;
-        }
-
-        .notif-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 10px 12px;
-            border-bottom: 1px solid #eef2f7;
-            background: #fbfdff;
-        }
-
-        .notif-head strong {
-            font-size: 12.5px;
-            font-weight: 700;
-            color: var(--text-main);
-        }
-
-        .notif-count {
-            font-size: 11px;
-            color: var(--text-light);
-        }
-
-        .notif-list {
-            max-height: 280px;
-            overflow-y: auto;
-        }
-
-        .notif-item {
-            display: block;
-            text-decoration: none;
-            color: inherit;
-            border-bottom: 1px solid #eef2f7;
-            padding: 10px 12px;
-            transition: background .15s;
-        }
-
-        .notif-item:hover {
-            background: #f8fbff;
-        }
-
-        .notif-item:last-child {
-            border-bottom: none;
-        }
-
-        .notif-item-title {
-            font-size: 12px;
-            font-weight: 700;
-            color: var(--text-main);
-            margin-bottom: 2px;
-        }
-
-        .notif-item-message {
-            font-size: 12px;
-            color: var(--text-muted);
-            line-height: 1.35;
-        }
-
-        .notif-item-time {
-            margin-top: 4px;
-            font-size: 11px;
-            color: var(--text-light);
-        }
-
-        .notif-empty {
-            font-size: 12.5px;
-            color: var(--text-muted);
-            padding: 16px 14px;
-            text-align: center;
-        }
-
-        @media (max-width: 768px) {
-            .notif-popover {
-                width: min(320px, calc(100vw - 24px));
-                right: 0;
-            }
         }
     </style>
+    <?php $gbBellEndpoint = 'notifications.php'; include __DIR__ . '/activity_bell.php'; ?>
     <script>
     window.AdminToast = window.AdminToast || (function () {
         let host = null;
@@ -869,7 +778,7 @@
 
             return new Promise(function (resolve) {
                 const overlay = document.createElement('div');
-                overlay.className = 'admin-confirm-overlay';
+                overlay.className = 'admin-confirm-overlay' + (opts.danger ? ' danger' : '');
                 overlay.innerHTML = '' +
                     '<div class="admin-confirm" role="dialog" aria-modal="true" aria-label="Confirmation dialog">' +
                         '<div class="admin-confirm-head">' +
@@ -938,132 +847,6 @@
     });
 
     document.addEventListener('DOMContentLoaded', function () {
-        const topbarRight = document.querySelector('.topbar .topbar-right');
-        const bellBtn = topbarRight ? (topbarRight.querySelector('.notif-btn') || topbarRight.querySelector('.icon-btn[title="Notifications"]')) : null;
-
-        if (topbarRight && bellBtn) {
-            let popover = topbarRight.querySelector('.notif-popover');
-            if (!popover) {
-                popover = document.createElement('div');
-                popover.className = 'notif-popover';
-                popover.innerHTML = '' +
-                    '<div class="notif-head">' +
-                        '<strong>Notifications</strong>' +
-                        '<span class="notif-count">0 new</span>' +
-                    '</div>' +
-                    '<div class="notif-list">' +
-                        '<div class="notif-empty">Loading notifications...</div>' +
-                    '</div>';
-
-                topbarRight.appendChild(popover);
-            }
-
-            bellBtn.setAttribute('role', 'button');
-            bellBtn.setAttribute('tabindex', '0');
-            bellBtn.setAttribute('aria-label', 'Open notifications');
-            bellBtn.setAttribute('aria-expanded', 'false');
-
-            const closePopover = function () {
-                popover.classList.remove('open');
-                bellBtn.setAttribute('aria-expanded', 'false');
-            };
-
-            const setNotifications = function (items) {
-                const countEl = popover.querySelector('.notif-count');
-                const listEl = popover.querySelector('.notif-list');
-                if (!listEl || !countEl) return;
-
-                const safeItems = Array.isArray(items) ? items : [];
-                countEl.textContent = safeItems.length + (safeItems.length === 1 ? ' new' : ' new');
-
-                if (safeItems.length === 0) {
-                    listEl.innerHTML = '<div class="notif-empty">No notifications yet.</div>';
-                    return;
-                }
-
-                listEl.innerHTML = safeItems.map(function (item) {
-                    const title = String(item.title || 'Case Update')
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;');
-                    const message = String(item.message || '')
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;');
-                    const time = String(item.time || '')
-                        .replace(/&/g, '&amp;')
-                        .replace(/</g, '&lt;')
-                        .replace(/>/g, '&gt;');
-                    const url = String(item.url || '#').replace(/"/g, '&quot;');
-
-                    return '' +
-                        '<a class="notif-item" href="' + url + '">' +
-                            '<div class="notif-item-title">' + title + '</div>' +
-                            '<div class="notif-item-message">' + message + '</div>' +
-                            '<div class="notif-item-time">' + time + '</div>' +
-                        '</a>';
-                }).join('');
-            };
-
-            const loadNotifications = function () {
-                fetch('notifications.php', { credentials: 'same-origin' })
-                    .then(function (response) {
-                        if (!response.ok) {
-                            throw new Error('Request failed');
-                        }
-                        return response.json();
-                    })
-                    .then(function (data) {
-                        if (data && data.success) {
-                            setNotifications(data.items || []);
-                            return;
-                        }
-                        setNotifications([]);
-                    })
-                    .catch(function () {
-                        const listEl = popover.querySelector('.notif-list');
-                        if (listEl) {
-                            listEl.innerHTML = '<div class="notif-empty">Unable to load notifications.</div>';
-                        }
-                    });
-            };
-
-            const togglePopover = function () {
-                const willOpen = !popover.classList.contains('open');
-                if (willOpen) {
-                    popover.classList.add('open');
-                    bellBtn.setAttribute('aria-expanded', 'true');
-                } else {
-                    closePopover();
-                }
-            };
-
-            bellBtn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                togglePopover();
-            });
-
-            bellBtn.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    togglePopover();
-                }
-            });
-
-            document.addEventListener('click', function (e) {
-                if (!topbarRight.contains(e.target)) {
-                    closePopover();
-                }
-            });
-
-            document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape') {
-                    closePopover();
-                }
-            });
-
-            loadNotifications();
-        }
 
         const profilePills = document.querySelectorAll('.topbar .user-pill');
         if (profilePills.length > 0) {

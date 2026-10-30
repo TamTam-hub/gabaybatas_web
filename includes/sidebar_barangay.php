@@ -25,10 +25,10 @@
             <i class="uil uil-balance-scale"></i> Case Process
         </a>
         <a href="kp_reports.php" <?= ($page === 'kp_reports.php') ? 'class="active"' : '' ?>>
-            <i class="uil uil-file-graph"></i> KP Reports
+            <i class="uil uil-file-graph"></i> Monthly Report
         </a>
         <a href="reports.php" <?= ($page === 'reports.php') ? 'class="active"' : '' ?>>
-            <i class="uil uil-chart-bar"></i> Reports
+            <i class="uil uil-chart-bar"></i> Flexible Reports
         </a>
 
         <div class="sidebar-section">Account</div>

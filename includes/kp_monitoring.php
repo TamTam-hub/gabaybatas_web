@@ -173,11 +173,23 @@ if (!function_exists('kp_monitoring_html')) {
 
         $secretary = KP_LUPON_SECRETARY !== '' ? $e(KP_LUPON_SECRETARY) : '&nbsp;';
 
+        // City and barangay seals, embedded so Dompdf needs no file access.
+        $seal = static function (string $file): string {
+            $path = __DIR__ . '/../images/' . $file;
+            return is_file($path)
+                ? '<img src="data:image/png;base64,' . base64_encode((string)file_get_contents($path)) . '" style="height:62px;">'
+                : '';
+        };
+
         return '<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
             @page { size: A4 landscape; margin: 28px 34px; }
             body { font-family: "DejaVu Sans", sans-serif; font-size: 8.5px; color: #000; }
             .formno { font-size: 7.5px; }
-            .lgu { font-weight: bold; font-size: 10px; line-height: 1.35; }
+            .head { width: 440px; border-collapse: collapse; margin: 2px auto 0; }
+            .head td { border: none; height: auto; padding: 0; vertical-align: middle; }
+            .head .seal { width: 90px; text-align: center; }
+            .lgu { text-align: center; font-size: 10px; line-height: 1.35; }
+            .lgu b { font-size: 11px; }
             h1 { text-align: center; font-size: 15px; margin: 6px 0 2px; }
             .sub { text-align: center; font-weight: bold; font-size: 9px; }
             .month { text-align: center; font-size: 9px; margin-top: 2px; }
@@ -189,10 +201,16 @@ if (!function_exists('kp_monitoring_html')) {
             tr.total td { font-weight: bold; }
             .sign { width: 100%; margin-top: 18px; }
             .sign td { border: none; width: 50%; vertical-align: top; font-size: 8.5px; }
+            .sigblock { width: 230px; margin: 0 auto; }
+            .sig-gap { height: 30px; }
             .line { margin-top: 24px; width: 230px; border-top: 1px solid #000; text-align: center; padding-top: 2px; }
         </style></head><body>
             <div class="formno">KP Monitoring Form No. 1</div>
-            <div class="lgu">PROVINCE OF ' . $e(mb_strtoupper(KP_PROVINCE, 'UTF-8')) . '<br>CITY OF ' . $e(mb_strtoupper(KP_MUNICIPALITY, 'UTF-8')) . '<br>BARANGAY ' . $e(mb_strtoupper(KP_BARANGAY_NAME, 'UTF-8')) . '</div>
+            <table class="head"><tr>
+                <td class="seal">' . $seal('seal_city_catbalogan.png') . '</td>
+                <td class="lgu">Republic of the Philippines<br>PROVINCE OF ' . $e(mb_strtoupper(KP_PROVINCE, 'UTF-8')) . '<br>CITY OF ' . $e(mb_strtoupper(KP_MUNICIPALITY, 'UTF-8')) . '<br><b>BARANGAY ' . $e(mb_strtoupper(KP_BARANGAY_NAME, 'UTF-8')) . '</b></td>
+                <td class="seal">' . $seal('seal_barangay_munoz.png') . '</td>
+            </tr></table>
             <h1>LUPON TAGAPAMAYAPA</h1>
             <div class="sub">CASES FILED, ACTIONS TAKEN AND PROBLEMS ENCOUNTERED ON KP IMPLEMENTATION</div>
             <div class="month">For the month <u>&nbsp;' . $e($monthLabel) . '&nbsp;</u>, CY <u>&nbsp;' . $year . '&nbsp;</u></div>
@@ -212,8 +230,8 @@ if (!function_exists('kp_monitoring_html')) {
                 <tbody>' . $body . $totalRow . '</tbody>
             </table>
             <table class="sign"><tr>
-                <td>Prepared by:<div class="line"><b>' . $secretary . '</b><br>Barangay Secretary</div></td>
-                <td>Attested by:<div class="line"><b>' . $e(KP_PUNONG_BARANGAY) . '</b><br>Punong Barangay<br>Chairman, Lupon Tagapamayapa</div></td>
+                <td><div class="sigblock">Prepared by:<div class="sig-gap"></div><div class="line"><b>' . $secretary . '</b><br>Barangay Secretary</div></div></td>
+                <td><div class="sigblock">Attested by:<div class="sig-gap"></div><div class="line"><b>' . $e(KP_PUNONG_BARANGAY) . '</b><br>Punong Barangay<br>Chairman, Lupon Tagapamayapa</div></div></td>
             </tr></table>
         </body></html>';
     }

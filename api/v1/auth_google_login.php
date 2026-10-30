@@ -163,6 +163,13 @@ if ($userId === '') {
     api_error('Unable to determine user ID.', 500);
 }
 
+$loginUpdate = $conn->prepare('UPDATE users SET last_login = NOW() WHERE id = ? LIMIT 1');
+if ($loginUpdate) {
+    $loginUpdate->bind_param('s', $userId);
+    $loginUpdate->execute();
+    $loginUpdate->close();
+}
+
 $tokenResult = api_issue_token($conn, $userId);
 if (!$tokenResult) {
     api_error('Unable to create access token.', 500);

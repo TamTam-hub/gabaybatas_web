@@ -11,6 +11,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'barangay') {
 require_once '../config/database.php';
 require_once '../config/kp.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
+require_once __DIR__ . '/../includes/pagination.php';
 gabaybatas_block_barangay_delete_requests();
 
 $currentBarangay = gabaybatas_get_user_barangay($conn);
@@ -20,8 +21,60 @@ $caseIdParam = trim((string)($_GET['id'] ?? ''));
 $case = null;
 $error = '';
 
-if ($caseIdParam === '') {
-    $error = 'Missing case id.';
+// ── Case finder (opened from the sidebar without a case) ──
+$finderMode = $caseIdParam === '';
+$finderQuery = trim((string)($_GET['q'] ?? ''));
+$finderCases = [];
+
+if ($finderMode) {
+    $hasCaseBarangay = gabaybatas_table_has_column($conn, 'cases', 'barangay');
+    $where = ['c.archived_at IS NULL'];
+    $types = '';
+    $params = [];
+    if ($hasCaseBarangay && $currentBarangay !== '') {
+        $where[] = 'LOWER(c.barangay) = LOWER(?)';
+        $types .= 's';
+        $params[] = $currentBarangay;
+    }
+    if ($finderQuery !== '') {
+        // "C-0055", "0055" and "55" all find case C-0055.
+        $digits = preg_replace('/^\s*C\s*-\s*/i', '', $finderQuery);
+        $where[] = '(c.case_id LIKE ? OR c.name LIKE ? OR c.complained_person LIKE ? OR c.case_type LIKE ?'
+            . (ctype_digit($digits) ? ' OR c.id = ?' : '') . ')';
+        $like = '%' . $finderQuery . '%';
+        $types .= 'ssss';
+        array_push($params, $like, $like, $like, $like);
+        if (ctype_digit($digits)) {
+            $types .= 'i';
+            $params[] = (int)$digits;
+        }
+    }
+    // One page at a time (includes/pagination.php).
+    $finderTotal = 0;
+    $countStmt = $conn->prepare('SELECT COUNT(*) FROM cases c WHERE ' . implode(' AND ', $where));
+    if ($countStmt) {
+        if ($types !== '') {
+            $countStmt->bind_param($types, ...$params);
+        }
+        $countStmt->execute();
+        $finderTotal = (int)$countStmt->get_result()->fetch_row()[0];
+        $countStmt->close();
+    }
+    $finderPerPage = gabaybatas_per_page(10);
+    $finderPage = min(max(1, (int)($_GET['page'] ?? 1)), max(1, (int)ceil($finderTotal / $finderPerPage)));
+    $finderOffset = ($finderPage - 1) * $finderPerPage;
+    $stmt = $conn->prepare(
+        'SELECT c.id, c.case_id, c.name, c.complained_person, c.case_type, c.kp_status, c.date_submitted
+         FROM cases c WHERE ' . implode(' AND ', $where) . " ORDER BY c.id DESC LIMIT {$finderOffset}, {$finderPerPage}"
+    );
+    if ($stmt) {
+        if ($types !== '') {
+            $stmt->bind_param($types, ...$params);
+        }
+        $stmt->execute();
+        $finderCases = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+    }
 } else {
     $stmt = $conn->prepare(
         "SELECT c.*, 
@@ -316,11 +369,58 @@ $actionError = [
     </div>
 
     <div class="page-body kp-body">
-        <?php if ($error !== ''): ?>
+        <?php if ($finderMode): ?>
+            <div class="kp-section-card">
+                <h3 class="kp-section-title">Find a Case</h3>
+                <p class="kp-section-desc">Search by case number, complainant, respondent or case type, then open the case to continue its process.</p>
+                <form method="GET" action="case_process.php" class="kp-finder-form">
+                    <div class="kp-field kp-finder-input">
+                        <input type="text" name="q" value="<?= htmlspecialchars($finderQuery) ?>" placeholder="e.g. C-0055, Albos, Noise Complaint" autofocus>
+                    </div>
+                    <button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-search"></i> Search</button>
+                    <?php if ($finderQuery !== ''): ?>
+                        <a href="case_process.php" class="kp-btn kp-btn-ghost">Clear</a>
+                    <?php endif; ?>
+                </form>
+                <div class="kp-finder-meta">
+                    <span>
+                        <?= $finderTotal ?> case<?= $finderTotal === 1 ? '' : 's' ?><?= $finderQuery !== '' ? ' found' : '' ?>
+                    </span>
+                </div>
+
+                <?php if (!$finderCases): ?>
+                    <div class="kp-finder-empty">
+                        <i class="uil uil-folder-open"></i>
+                        <p><?= $finderQuery !== '' ? 'No case matches "' . htmlspecialchars($finderQuery) . '".' : 'No cases to show.' ?></p>
+                    </div>
+                <?php else: ?>
+                    <div class="kp-finder-list">
+                        <?php foreach ($finderCases as $row):
+                            $rowStatus = (string)($row['kp_status'] ?: 'filed');
+                            $rowColor = kp_status_color($rowStatus);
+                            $rowCode = $row['case_id'] ?: ('C-' . str_pad((string)$row['id'], 4, '0', STR_PAD_LEFT));
+                        ?>
+                        <a class="kp-finder-row" href="case_process.php?id=<?= (int)$row['id'] ?>">
+                            <div class="kp-finder-code"><?= htmlspecialchars($rowCode) ?></div>
+                            <div class="kp-finder-parties">
+                                <strong><?= htmlspecialchars($row['name'] ?: '—') ?></strong>
+                                <span>vs. <?= htmlspecialchars($row['complained_person'] ?: '—') ?> · <?= htmlspecialchars($row['case_type'] ?: 'Unspecified') ?></span>
+                            </div>
+                            <span class="kp-status-badge" style="background: <?= $rowColor ?>15; color: <?= $rowColor ?>; border: 1px solid <?= $rowColor ?>30;">
+                                <?= htmlspecialchars(kp_status_label($rowStatus)) ?>
+                            </span>
+                            <i class="uil uil-angle-right kp-finder-arrow"></i>
+                        </a>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php gabaybatas_pagination($finderTotal, $finderPage, $finderPerPage, ['q' => $finderQuery], 'cases'); ?>
+                <?php endif; ?>
+            </div>
+        <?php elseif ($error !== ''): ?>
             <div class="kp-error-card">
                 <i class="uil uil-exclamation-circle"></i>
                 <div class="kp-error-title"><?= htmlspecialchars($error) ?></div>
-                <a href="cases.php" class="kp-back-link">Return to case list</a>
+                <a href="case_process.php" class="kp-back-link">Search for another case</a>
             </div>
         <?php else: ?>
 
@@ -1627,13 +1727,81 @@ const requestedTab = <?= json_encode($requestedTab, JSON_HEX_TAG | JSON_HEX_APOS
 const initialTab = hash || requestedTab;
 if (initialTab) switchTab(initialTab);
 
-// ── Form confirmations ──
+// ── Form confirmations (styled dialog from includes/header.php) ──
+// Searches and document generation do not change the case, so they skip this.
+const kpConfirmTexts = {
+    set_nature:           { title: 'Update the nature of the case?', message: 'This changes how the case is counted in the KP Monitoring Report.', confirmText: 'Update' },
+    review:               { title: 'Submit this decision?', message: 'Decision: {choice}. The resident will see the updated status of the complaint in the app.', confirmText: 'Submit Decision' },
+    schedule:             { title: 'Schedule this hearing?', message: 'The date, time and place will be saved to the case. Notices for this hearing can then be generated.', confirmText: 'Schedule' },
+    schedule_explanation: { title: 'Schedule the explanation hearing?', message: 'The absent party will be given a chance to explain why they did not appear.', confirmText: 'Schedule' },
+    record_outcome:       { title: 'Record this hearing outcome?', message: 'Outcome: {choice}. The case will move to the next step based on this outcome.', confirmText: 'Record Outcome' },
+    record_service:       { title: 'Record service of the summons?', message: 'The date and manner of service will be printed on the Officer\'s Return.', confirmText: 'Record Service' },
+    pangkat:              { title: 'Record the Pangkat members?', message: 'The chosen members, chairman and secretary will be saved and used on the conciliation forms.', confirmText: 'Record Pangkat' },
+    extend_conciliation:  { title: 'Extend conciliation by 15 days?', message: 'The Pangkat may extend the conciliation period only once, for a meritorious case.', confirmText: 'Extend' },
+    record:               { title: 'Record the amicable settlement?', message: 'The 10-day repudiation period starts from the settlement date.', confirmText: 'Record Settlement' },
+    repudiate:            { title: 'Record the repudiation?', message: 'The settlement will be set aside and the complainant will be certified to file the case in court (KP Form 20).', confirmText: 'Record Repudiation', danger: true },
+    confirm_final:        { title: 'Confirm final and executory?', message: 'Confirm only if no repudiation was filed within the 10-day period. The settlement or award will then have the force of a final court judgment.', confirmText: 'Confirm Final' },
+    record_transmittal:   { title: 'Record the transmittal to court?', message: 'This records the date the settlement or award was sent to the city/municipal court.', confirmText: 'Record Transmittal' },
+    agree:                { title: 'Record the agreement for arbitration?', message: 'Either party may repudiate the agreement within 5 days. The arbitration hearing can be scheduled after that period.', confirmText: 'Record Agreement' },
+    repudiate_agreement:  { title: 'Record repudiation of the arbitration agreement?', message: 'The agreement will be set aside and the complainant will be certified to file the case in court.', confirmText: 'Record Repudiation', danger: true },
+    award:                { title: 'Record the arbitration award?', message: 'The award becomes final after 10 days unless a petition to nullify it is filed in court.', confirmText: 'Record Award' },
+    start_monitoring:     { title: 'Begin compliance monitoring?', message: 'Track whether the parties carry out the settlement or award.', confirmText: 'Begin Monitoring' },
+    mark_complied:        { title: 'Close the case as complied?', message: 'The parties fully carried out the settlement or award. The case will be closed.', confirmText: 'Close Case' },
+    partial_compliance:   { title: 'Record partial compliance?', message: 'Your note will be added to the case. The case stays under monitoring.', confirmText: 'Save Note' },
+    non_compliance:       { title: 'Record non-compliance?', message: 'The case will move to Execution so the prevailing party can file a Motion for Execution.', confirmText: 'Record' },
+    file_motion:          { title: 'File the Motion for Execution?', message: 'A hearing on the motion must be held within 5 days.', confirmText: 'File Motion' },
+    schedule_hearing:     { title: 'Schedule the execution hearing?', message: 'The obliged party will be asked why they have not complied.', confirmText: 'Schedule' },
+    complied:             { title: 'Record voluntary compliance?', message: 'The obliged party complied after the motion was filed.', confirmText: 'Record' },
+    issue_notice:         { title: 'Issue the Notice of Execution?', message: 'Use this only if the obliged party still has not complied 5 days after the hearing.', confirmText: 'Issue Notice', danger: true },
+    mark_executed:        { title: 'Mark execution as completed?', message: 'The settlement or award has been enforced.', confirmText: 'Mark Completed' },
+    close_lapsed:         { title: 'Close the case?', message: 'The 6-month barangay execution period has passed. The settlement or award can now be enforced only through the court.', confirmText: 'Close Case', danger: true },
+    close_case:           { title: 'Close the case?', message: 'The case will be closed and its outcome recorded.', confirmText: 'Close Case' }
+};
+
+function kpFormAction(form, submitter) {
+    if (submitter && submitter.name === 'action') return submitter.value;
+    const field = form.querySelector('[name="action"]');
+    if (field) return field.value;
+    if (form.action.includes('kp_review.php')) return 'review';
+    if (form.action.includes('kp_pangkat.php')) return 'pangkat';
+    return '';
+}
+
+function kpSelectedChoice(form, action) {
+    const name = action === 'record_outcome' ? 'outcome' : (action === 'review' ? 'decision' : 'action');
+    const select = form.querySelector('select[name="' + name + '"]');
+    return select && select.selectedIndex > 0 ? select.options[select.selectedIndex].text.trim() : '';
+}
+
 document.querySelectorAll('form').forEach(form => {
-    form.addEventListener('submit', function(e) {
-        const action = this.querySelector('[name="action"]');
-        if (action && action.value === 'generate') return; // Don't confirm doc generation
-        if (!confirm('Are you sure you want to proceed with this action?')) {
-            e.preventDefault();
+    if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') return;
+    form.addEventListener('submit', async function (e) {
+        if (this.dataset.confirmed === '1') return;
+        const action = kpFormAction(this, e.submitter);
+        if (action === 'generate') return;
+        e.preventDefault();
+
+        const submitter = e.submitter;
+        const buttonText = submitter ? submitter.textContent.trim() : '';
+        const text = kpConfirmTexts[action] || {};
+        const choice = kpSelectedChoice(this, action);
+        const options = {
+            title: text.title || (buttonText ? buttonText + '?' : 'Save this action?'),
+            message: (text.message || 'This will be saved to the case record.').replace('{choice}', choice || 'as selected'),
+            confirmText: text.confirmText || buttonText || 'Confirm',
+            cancelText: 'Cancel',
+            danger: !!text.danger
+        };
+        const ok = window.AdminConfirm
+            ? await window.AdminConfirm.confirm(options)
+            : window.confirm(options.title + '\n\n' + options.message);
+        if (!ok) return;
+
+        this.dataset.confirmed = '1';
+        if (this.requestSubmit) {
+            this.requestSubmit(submitter || undefined);
+        } else {
+            this.submit();
         }
     });
 });
@@ -1835,6 +2003,24 @@ document.querySelectorAll('form').forEach(form => {
 .kp-error-card i { font-size: 36px; color: #f87171; display: block; margin-bottom: 8px; }
 .kp-error-title { font-size: 14px; color: #1e293b; margin-bottom: 10px; }
 .kp-back-link { font-size: 12.5px; color: #1d4ed8; text-decoration: none; font-weight: 600; }
+.kp-btn-ghost { background: #f1f5f9; color: #334155; text-decoration: none; } .kp-btn-ghost:hover { background: #e2e8f0; }
+.kp-finder-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.kp-finder-input { flex: 1; min-width: 220px; margin: 0; }
+.kp-finder-meta { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin: 14px 0 8px; font-size: 12.5px; color: #64748b; }
+.kp-finder-meta a { color: #1d4ed8; text-decoration: none; font-weight: 600; }
+.kp-finder-list { border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden; }
+.kp-finder-list + .gb-pg { border-top: 0; background: transparent; padding: 14px 0 0; }
+.kp-finder-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; text-decoration: none; color: inherit; border-bottom: 1px solid #f1f5f9; transition: background .15s; }
+.kp-finder-row:last-child { border-bottom: none; }
+.kp-finder-row:hover { background: #f8fafc; }
+.kp-finder-code { font-weight: 700; color: #1d4ed8; font-size: 13px; min-width: 64px; }
+.kp-finder-parties { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.kp-finder-parties strong { font-size: 13px; color: #1e293b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-finder-parties span { font-size: 12px; color: #64748b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-finder-arrow { font-size: 20px; color: #94a3b8; }
+.kp-finder-empty { text-align: center; padding: 28px 12px; color: #64748b; font-size: 13px; }
+.kp-finder-empty i { font-size: 32px; color: #cbd5e1; display: block; margin-bottom: 6px; }
+@media (max-width: 640px) { .kp-finder-row { flex-wrap: wrap; } .kp-finder-arrow { display: none; } }
 
 .kp-current-status { display: flex; align-items: center; gap: 14px; }
 .kp-big-badge { padding: 8px 18px; border-radius: 999px; font-size: 13px; font-weight: 700; }

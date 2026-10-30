@@ -40,6 +40,7 @@ $dompdf->loadHtml(kp_monitoring_html($report, $year, $month), 'UTF-8');
 $dompdf->setPaper('A4', 'landscape');
 $dompdf->render();
 
-$filename = sprintf('KP_Monitoring_Form_1_%04d_%02d.pdf', $year, $month);
+// e.g. KP_Monitoring_Form_1_October_2026.pdf
+$filename = sprintf('KP_Monitoring_Form_1_%s_%04d.pdf', date('F', mktime(0, 0, 0, $month, 1, $year)), $year);
 $dompdf->stream($filename, ['Attachment' => true]);
 exit();

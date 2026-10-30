@@ -129,7 +129,7 @@ if ($result) {
         // Timeline events
         $timeline = [];
         if ($cRowId > 0) {
-            $tlStmt = $conn->prepare("SELECT stage, status, event_type, title, details, event_at, created_at FROM kp_timeline_events WHERE case_id = ? ORDER BY id DESC LIMIT 10");
+            $tlStmt = $conn->prepare("SELECT stage, status, event_type, title, details, event_at, created_at FROM kp_timeline_events WHERE case_id = ? AND event_type <> 'details_corrected' ORDER BY id DESC LIMIT 10");
             if ($tlStmt) {
                 $tlStmt->bind_param('i', $cRowId);
                 $tlStmt->execute();

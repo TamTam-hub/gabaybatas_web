@@ -52,6 +52,7 @@ if ($caseIdParam === '') {
     if ($barangayColumn) { $selectFields[] = "$barangayColumn AS case_barangay"; }
     if ($dateColumn)     { $selectFields[] = "$dateColumn AS case_date"; }
     if ($descColumn)     { $selectFields[] = "$descColumn AS case_description"; }
+    if ($hasColumn('archived_at')) { $selectFields[] = "archived_at AS case_archived_at, archive_reason AS case_archive_reason"; }
 
     if (!$selectFields) {
         $error = 'No readable fields found in case table.';
@@ -95,6 +96,10 @@ if ($caseIdParam === '') {
         }
     }
 }
+// Archived cases are read-only here: no Edit, and Back returns to the Records Archive.
+$isArchived = !empty($case['case_archived_at']);
+$backUrl = $isArchived ? 'archive.php?tab=cases' : 'all_cases.php';
+$backLabel = $isArchived ? 'Back to Records Archive' : 'Back to Manage Cases';
 ?>
 <?php include('../includes/header_admin.php'); ?>
 <?php include('../includes/sidebar_admin.php'); ?>
@@ -122,12 +127,22 @@ if ($caseIdParam === '') {
         <div class="cv-head fade-up" style="--d:0s">
             <p class="cv-sub">Review complete information for the selected case record.</p>
             <div class="cv-head-actions">
-                <?php if ($error === '' && $case !== null): ?>
+                <?php if ($error === '' && $case !== null && !$isArchived): ?>
                 <a href="edit_case.php?id=<?= urlencode($caseIdParam) ?>" class="cv-edit-btn"><i class="uil uil-edit"></i> Edit Case</a>
                 <?php endif; ?>
-                <a href="all_cases.php" class="cv-back-btn"><i class="uil uil-arrow-left"></i> Back to All Cases</a>
+                <a href="<?= $backUrl ?>" class="cv-back-btn"><i class="uil uil-arrow-left"></i> <?= $backLabel ?></a>
             </div>
         </div>
+
+        <?php if ($isArchived): ?>
+        <div class="cv-archived fade-up" style="--d:.04s">
+            <i class="uil uil-archive"></i>
+            <div>
+                <strong>This case is archived and read-only.</strong>
+                <span>Archived on <?= htmlspecialchars(date('M d, Y h:i A', strtotime((string)$case['case_archived_at']))) ?><?= !empty($case['case_archive_reason']) ? ' · Reason: ' . htmlspecialchars((string)$case['case_archive_reason']) : '' ?>. Restore it from the Records Archive to edit it again.</span>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div class="cv-card fade-up" style="--d:.08s">
             <?php if ($error !== ''): ?>
@@ -223,6 +238,10 @@ document.querySelectorAll('.fade-up').forEach(el => cvObserver.observe(el));
 
 .cv-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 14px; }
 .cv-head-actions { display: inline-flex; align-items: center; gap: 8px; }
+.cv-archived { display: flex; align-items: flex-start; gap: 10px; padding: 12px 15px; margin-bottom: 14px; border: 1px solid #fde68a; border-radius: 10px; background: #fffbeb; color: #92400e; font-size: 13px; }
+.cv-archived i { font-size: 18px; margin-top: 1px; }
+.cv-archived strong { display: block; color: #78350f; }
+.cv-archived span { display: block; margin-top: 2px; }
 .cv-sub { font-size: 12.5px; color: var(--text-sub); margin: 0; }
 .cv-edit-btn {
     display: inline-flex; align-items: center; gap: 6px;

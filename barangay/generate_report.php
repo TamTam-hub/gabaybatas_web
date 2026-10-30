@@ -7,729 +7,207 @@ if (!isset($_SESSION['role']) || !in_array($_SESSION['role'], ['barangay', 'admi
 }
 
 require_once '../config/database.php';
+require_once '../config/kp.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
+require_once __DIR__ . '/../includes/flexible_report.php';
 require_once __DIR__ . '/../vendor/autoload.php';
 gabaybatas_block_barangay_delete_requests();
 
 use Dompdf\Dompdf;
 use Dompdf\Options;
 
-// ── FILTER INPUTS ────────────────────────────────────────────────
-$reportType = strtolower(trim((string)($_GET['type'] ?? 'all')));
-if ($reportType === 'summary') {
-    $reportType = 'yearly';
-}
-$allowedTypes = ['all', 'monthly', 'quarterly', 'yearly'];
-if (!in_array($reportType, $allowedTypes, true)) {
-    $reportType = 'all';
-}
-
-$statusFilterRaw = trim((string)($_GET['status'] ?? ''));
-$allowedStatuses = ['Pending', 'In Progress', 'Resolved'];
-$statusFilter = '';
-foreach ($allowedStatuses as $allowedStatus) {
-    if (strcasecmp($statusFilterRaw, $allowedStatus) === 0) {
-        $statusFilter = $allowedStatus;
-        break;
-    }
-}
-
-$caseTypeFilter = trim((string)($_GET['case_type'] ?? ''));
-$searchRaw = trim((string)($_GET['search'] ?? ''));
-$dateFromRaw = trim((string)($_GET['date_from'] ?? ''));
-$dateToRaw = trim((string)($_GET['date_to'] ?? ''));
-$includeAll = (string)($_GET['include_all'] ?? '0') === '1';
-
-// The monthly report is the official KP Monitoring Form No. 1 for the current month.
-if ($reportType === 'monthly' && !$includeAll) {
-    $nowForMonthly = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
-    header('Location: kp_monitoring_report.php?month=' . $nowForMonthly->format('n') . '&year=' . $nowForMonthly->format('Y'));
-    exit();
-}
-
-$isValidDate = static function (string $value): bool {
-    if ($value === '') {
-        return false;
-    }
-
-    $dt = DateTime::createFromFormat('Y-m-d', $value);
-    return $dt !== false && $dt->format('Y-m-d') === $value;
-};
-
-$dateFrom = $isValidDate($dateFromRaw) ? $dateFromRaw : '';
-$dateTo = $isValidDate($dateToRaw) ? $dateToRaw : '';
-if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) {
-    $tmp = $dateFrom;
-    $dateFrom = $dateTo;
-    $dateTo = $tmp;
-}
-
-$appTimezone = new DateTimeZone('Asia/Manila');
-$nowManila = new DateTimeImmutable('now', $appTimezone);
-
-$month       = $nowManila->format('m');
-$year        = $nowManila->format('Y');
-$generatedAt = $nowManila->format('F d, Y \\a\\t h:i A');
-$currentBarangay = gabaybatas_get_user_barangay($conn);
-
-$caseColumns = [];
-$colResult = $conn->query("SHOW COLUMNS FROM cases");
-if ($colResult) {
-    while ($col = $colResult->fetch_assoc()) {
-        $caseColumns[] = $col['Field'];
-    }
-}
-
-$hasColumn = static function (string $column) use ($caseColumns): bool {
-    return in_array($column, $caseColumns, true);
-};
-
-$idColumn = $hasColumn('id') ? 'id' : ($hasColumn('case_id') ? 'case_id' : null);
-$displayIdColumn = $hasColumn('case_id') ? 'case_id' : ($hasColumn('id') ? 'id' : null);
-$residentColumn = $hasColumn('name') ? 'name' : ($hasColumn('resident_name') ? 'resident_name' : null);
-$typeColumn = $hasColumn('case_type') ? 'case_type' : ($hasColumn('type') ? 'type' : null);
-$statusColumn = $hasColumn('status') ? 'status' : null;
-$dateColumn = $hasColumn('date_submitted') ? 'date_submitted' : ($hasColumn('created_at') ? 'created_at' : ($hasColumn('updated_at') ? 'updated_at' : null));
-$hasCaseBarangay = $hasColumn('barangay');
+// Same filters and rows as the Flexible Reports page (includes/flexible_report.php).
 $isBarangayUser = ($_SESSION['role'] ?? '') === 'barangay';
+$scopeBarangay = $isBarangayUser ? gabaybatas_get_user_barangay($conn) : '';
+$params = gabaybatas_flex_params($_GET);
+$report = gabaybatas_flex_report($conn, $scopeBarangay, $params);
+$groups = gabaybatas_flex_groups();
 
-$scopeSql = '';
-if ($isBarangayUser && $hasCaseBarangay && $currentBarangay !== '') {
-    $scopeSql = " AND LOWER(barangay) = LOWER('" . $conn->real_escape_string($currentBarangay) . "')";
-}
+$nowManila = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
+$generatedAt = $nowManila->format('F d, Y \a\t h:i A');
+$reportTitle = 'Case Report';
+$reportPeriod = $report['period_label'];
+$filterSummaryText = $report['applied'] ? implode('; ', $report['applied']) : 'None (all non-archived cases)';
+$filename = 'Barangay_Munoz_Case_Report_' . $nowManila->format('F_j_Y') . '.pdf';
 
-$whereParts = ['1=1'];
-if ($scopeSql !== '') {
-    $whereParts[] = ltrim($scopeSql, ' AND');
-}
-
-$appliedFilters = [];
-if (!$includeAll) {
-    $month = (int)$nowManila->format('n');
-    $year = (int)$nowManila->format('Y');
-
-    if ($reportType === 'monthly' && $dateColumn) {
-        $whereParts[] = "MONTH({$dateColumn}) = {$month} AND YEAR({$dateColumn}) = {$year}";
-        $appliedFilters[] = 'This Month';
-    } elseif ($reportType === 'quarterly' && $dateColumn) {
-        $q = (int)ceil($month / 3);
-        $startMonth = (($q - 1) * 3) + 1;
-        $endMonth = $startMonth + 2;
-        $whereParts[] = "MONTH({$dateColumn}) BETWEEN {$startMonth} AND {$endMonth} AND YEAR({$dateColumn}) = {$year}";
-        $appliedFilters[] = 'Quarter ' . $q;
-    } elseif ($reportType === 'yearly' && $dateColumn) {
-        $whereParts[] = "YEAR({$dateColumn}) = {$year}";
-        $appliedFilters[] = 'Year ' . $year;
-    }
-
-    if ($statusFilter !== '' && $statusColumn) {
-        $safeStatus = $conn->real_escape_string($statusFilter);
-        $whereParts[] = "LOWER({$statusColumn}) = LOWER('{$safeStatus}')";
-        $appliedFilters[] = 'Status: ' . $statusFilter;
-    }
-
-    if ($caseTypeFilter !== '' && $typeColumn) {
-        $safeType = $conn->real_escape_string($caseTypeFilter);
-        $whereParts[] = "LOWER({$typeColumn}) = LOWER('{$safeType}')";
-        $appliedFilters[] = 'Type: ' . $caseTypeFilter;
-    }
-
-    if ($searchRaw !== '') {
-        $safeSearch = $conn->real_escape_string($searchRaw);
-        $searchDigits = preg_replace('/^\s*C\s*-\s*/i', '', $searchRaw);
-        $searchDigits = preg_replace('/\D+/', '', (string)$searchDigits);
-
-        $searchParts = [];
-        if ($residentColumn) {
-            $searchParts[] = "{$residentColumn} LIKE '%{$safeSearch}%'";
-        }
-        if ($typeColumn) {
-            $searchParts[] = "{$typeColumn} LIKE '%{$safeSearch}%'";
-        }
-        if ($displayIdColumn) {
-            $searchParts[] = "CAST({$displayIdColumn} AS CHAR) LIKE '%{$safeSearch}%'";
-        }
-        if ($idColumn) {
-            $searchParts[] = "CAST({$idColumn} AS CHAR) LIKE '%{$safeSearch}%'";
-        }
-        if ($searchDigits !== '' && $displayIdColumn) {
-            $safeDigits = $conn->real_escape_string($searchDigits);
-            $searchParts[] = "CAST({$displayIdColumn} AS CHAR) LIKE '%{$safeDigits}%'";
-        }
-
-        if ($searchParts) {
-            $whereParts[] = '(' . implode(' OR ', $searchParts) . ')';
-            $appliedFilters[] = 'Search';
-        }
-    }
-
-    if ($dateColumn && $dateFrom !== '') {
-        $safeFrom = $conn->real_escape_string($dateFrom);
-        $whereParts[] = "DATE({$dateColumn}) >= '{$safeFrom}'";
-        $appliedFilters[] = 'From ' . $dateFrom;
-    }
-    if ($dateColumn && $dateTo !== '') {
-        $safeTo = $conn->real_escape_string($dateTo);
-        $whereParts[] = "DATE({$dateColumn}) <= '{$safeTo}'";
-        $appliedFilters[] = 'To ' . $dateTo;
-    }
-}
-
-$whereSql = ' WHERE ' . implode(' AND ', $whereParts);
-
-// ── STATISTICS ────────────────────────────────────────────────────
-$totalResult = $conn->query("SELECT COUNT(*) AS c FROM cases" . $whereSql);
-$totalCases = (int)($totalResult ? ($totalResult->fetch_assoc()['c'] ?? 0) : 0);
-
-$pendingCases = 0;
-$inProgCases = 0;
-$resolvedCases = 0;
-if ($statusColumn) {
-    $pendingRes = $conn->query("SELECT COUNT(*) AS c FROM cases" . $whereSql . " AND LOWER({$statusColumn})='pending'");
-    $inProgRes = $conn->query("SELECT COUNT(*) AS c FROM cases" . $whereSql . " AND LOWER({$statusColumn})='in progress'");
-    $resolvedRes = $conn->query("SELECT COUNT(*) AS c FROM cases" . $whereSql . " AND LOWER({$statusColumn})='resolved'");
-    $pendingCases = (int)($pendingRes ? ($pendingRes->fetch_assoc()['c'] ?? 0) : 0);
-    $inProgCases = (int)($inProgRes ? ($inProgRes->fetch_assoc()['c'] ?? 0) : 0);
-    $resolvedCases = (int)($resolvedRes ? ($resolvedRes->fetch_assoc()['c'] ?? 0) : 0);
-}
-
-// ── CASE QUERY ────────────────────────────────────────────────────
-$selectFields = [];
-if ($idColumn)       { $selectFields[] = "$idColumn AS row_id"; }
-if ($displayIdColumn){ $selectFields[] = "$displayIdColumn AS display_case_id"; }
-if ($residentColumn) { $selectFields[] = "$residentColumn AS resident_name"; }
-if ($typeColumn)     { $selectFields[] = "$typeColumn AS case_type"; }
-if ($statusColumn)   { $selectFields[] = "$statusColumn AS case_status"; }
-if ($dateColumn)     { $selectFields[] = "$dateColumn AS case_date"; }
-
-if (!$selectFields) {
-    $selectFields[] = "'' AS row_id";
-}
-
-$sql = "SELECT " . implode(', ', $selectFields) . " FROM cases" . $whereSql;
-$sql .= $dateColumn ? " ORDER BY $dateColumn DESC" : ($idColumn ? " ORDER BY $idColumn DESC" : '');
-$result = $conn->query($sql);
-
-// ── LABELS ────────────────────────────────────────────────────────
-$reportTitles = [
-    'all'       => 'Comprehensive Case Report',
-    'monthly'   => 'Monthly Case Report',
-    'yearly'    => 'Yearly Case Report',
-    'quarterly' => 'Quarterly Case Report',
-];
-
-$reportPeriods = [
-    'all'       => 'All Periods',
-    'monthly'   => $nowManila->format('F Y'),
-    'yearly'    => 'Year ' . $nowManila->format('Y'),
-    'quarterly' => 'Quarter ' . (int)ceil((int)$nowManila->format('n') / 3) . ', ' . $nowManila->format('Y'),
-];
-
-$filenameMap = [
-    'all'       => 'gabaybatas_all_data_report_'  . $nowManila->format('Ymd') . '.pdf',
-    'monthly'   => 'gabaybatas_monthly_report_'   . $nowManila->format('Ymd') . '.pdf',
-    'yearly'    => 'gabaybatas_yearly_report_'    . $nowManila->format('Ymd') . '.pdf',
-    'quarterly' => 'gabaybatas_quarterly_report_' . $nowManila->format('Ymd') . '.pdf',
-];
-
-$reportTitle  = $reportTitles[$reportType];
-$reportPeriod = $includeAll ? 'All Available Data' : $reportPeriods[$reportType];
-$filename     = $filenameMap[$reportType];
-$filterSummaryText = $includeAll
-    ? 'All data mode selected. No additional filters were applied.'
-    : ($appliedFilters ? implode(' | ', $appliedFilters) : 'No extra filters applied.');
-
-// ── LOGO SVG ─────────────────────────────────────────────────────
-// Matches the login page: dark navy rounded square, white shield, white checkmark.
-$logoSvg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">'
-    . '<rect width="100" height="100" rx="14" ry="14" fill="#1a3a6b"/>'
-    . '<path d="M50 18 L74 27 L74 48 C74 64 62 75 50 80 C38 75 26 64 26 48 L26 27 Z"'
-    .   ' fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>'
-    . '<polyline points="37,51 46,61 65,40"'
-    .   ' fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>'
-    . '</svg>';
-
-$logoDataUri = 'data:image/svg+xml;base64,' . base64_encode($logoSvg);
+// ── SEALS (same as KP Monitoring Form No. 1) ─────────────────────
+// Embedded so Dompdf needs no file access.
+$seal = static function (string $file): string {
+    $path = __DIR__ . '/../images/' . $file;
+    return is_file($path)
+        ? '<img src="data:image/png;base64,' . base64_encode((string)file_get_contents($path)) . '" style="height:70px;">'
+        : '';
+};
 
 // ── BUILD TABLE ROWS ──────────────────────────────────────────────
+$e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 $htmlRows = '';
 $rowNum   = 1;
-if ($result && $result->num_rows > 0) {
-    while ($row = $result->fetch_assoc()) {
-        $statusText  = (string)($row['case_status'] ?? 'Pending');
-        $status      = htmlspecialchars($statusText);
-        $statusClass = strtolower(str_replace(' ', '-', $statusText));
-        $residentName = htmlspecialchars((string)($row['resident_name'] ?? ''));
-        $typeText = htmlspecialchars((string)($row['case_type'] ?? ''));
-        $dateRaw = (string)($row['case_date'] ?? '');
-        $dateTs = strtotime($dateRaw);
-        $dateDisplay = htmlspecialchars($dateTs !== false ? date('M d, Y h:i A', $dateTs) : $dateRaw);
-        $caseIdText = htmlspecialchars(gabaybatas_format_case_id($row['display_case_id'] ?? '', $row['row_id'] ?? ''));
-        $rowBg       = ($rowNum % 2 === 0) ? '#f7f9fc' : '#ffffff';
-        $htmlRows   .= '<tr style="background:' . $rowBg . ';">'
-            . '<td style="padding:8px 10px;border-bottom:1px solid #dde4ee;font-weight:700;color:#12284a;white-space:nowrap;">'
-                . $caseIdText . '</td>'
-            . '<td style="padding:8px 10px;border-bottom:1px solid #dde4ee;">'
-                . $residentName . '</td>'
-            . '<td style="padding:8px 10px;border-bottom:1px solid #dde4ee;">'
-                . $typeText . '</td>'
-            . '<td style="padding:8px 10px;border-bottom:1px solid #dde4ee;">'
-                . '<span class="status ' . $statusClass . '">' . $status . '</span></td>'
-            . '<td style="padding:8px 10px;border-bottom:1px solid #dde4ee;white-space:nowrap;">'
-                . $dateDisplay . '</td>'
-            . '</tr>';
-        $rowNum++;
-    }
-} else {
-    $htmlRows = '<tr><td colspan="5" style="text-align:center;padding:28px;color:#7a8a9e;font-style:italic;">'
-    . 'No case records found for the selected filters.</td></tr>';
+foreach ($report['rows'] as $row) {
+    $dateTs = strtotime((string)($row['date_submitted'] ?? ''));
+    $htmlRows .= '<tr' . ($rowNum % 2 === 0 ? ' class="alt"' : '') . '>'
+        . '<td class="c">' . $rowNum . '</td>'
+        . '<td class="c nowrap"><b>' . $e(gabaybatas_format_case_id($row['case_id'] ?? '', $row['id'] ?? '')) . '</b></td>'
+        . '<td>' . $e($row['name'] ?? '') . '</td>'
+        . '<td>' . $e($row['complained_person'] ?? '') . '</td>'
+        . '<td>' . $e($row['case_type'] ?? '') . '</td>'
+        . '<td>' . $e(kp_status_label((string)$row['kp_status'])) . '</td>'
+        . '<td class="c nowrap">' . ($dateTs ? date('m/d/Y', $dateTs) : '') . '</td>'
+        . '</tr>';
+    $rowNum++;
 }
-
+if ($rowNum === 1) {
+    $htmlRows = '<tr><td colspan="7" class="c empty">No case records found for the selected filters.</td></tr>';
+}
 $caseCount = $rowNum - 1;
+
+// Prepared by the admin when downloaded from the admin pages, otherwise by the Barangay Secretary.
+$preparedBy = $isBarangayUser
+    ? (defined('KP_LUPON_SECRETARY') ? KP_LUPON_SECRETARY : '')
+    : GABAYBATAS_ADMIN_NAME;
+$preparedTitle = $isBarangayUser ? 'Barangay Secretary' : 'System Administrator';
+$captain   = defined('KP_PUNONG_BARANGAY') ? KP_PUNONG_BARANGAY : '';
+$upper     = static fn(string $v): string => mb_strtoupper($v, 'UTF-8');
 
 // ── HTML ──────────────────────────────────────────────────────────
 $html = '<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>' . htmlspecialchars($reportTitle) . '</title>
+<title>' . $e($reportTitle) . ' - Barangay ' . $e(KP_BARANGAY_NAME) . '</title>
 <style>
-    /*
-     * MARGIN FIX
-     * Dompdf does not reliably honour @page margin in most versions.
-     * Solution: set @page margin to 0, put ALL spacing on body padding.
-     * Dompdf always respects body padding correctly.
-     */
-    @page {
-        size: 8.5in 13in;
-        margin: 0;
-    }
+    @page { margin: 0; }
+    body { margin: 0; padding: 36px 46px 62px; font-family: "DejaVu Sans", sans-serif; font-size: 9px; color: #111; }
 
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    /* Letterhead, same as KP Monitoring Form No. 1 */
+    .head { width: 470px; border-collapse: collapse; margin: 0 auto; }
+    .head td { vertical-align: middle; padding: 0; }
+    .head .seal { width: 92px; text-align: center; }
+    .lgu { text-align: center; font-size: 10px; line-height: 1.4; }
+    .lgu b { font-size: 12px; letter-spacing: .5px; }
+    .lgu .office { font-size: 9px; font-weight: bold; letter-spacing: 1px; margin-top: 3px; color: #1a3a6b; }
+    .rule { border-top: 2px solid #1a3a6b; border-bottom: 1px solid #c2560c; height: 2px; margin: 10px 0 12px; }
 
-    body {
-        font-family: Arial, Helvetica, sans-serif;
-        font-size: 10.5pt;
-        color: #1a2535;
-        background: #ffffff;
-        line-height: 1.45;
-        /* ← Margins controlled entirely here (≈ 0.75in on sides, 0.67in top/bottom) */
-        padding: 48pt 54pt 48pt 54pt;
-    }
+    h1 { text-align: center; font-size: 15px; letter-spacing: 1px; margin: 0; color: #0e2242; }
+    .period { text-align: center; font-size: 9.5px; margin: 3px 0 12px; }
 
-    /* ── HEADER ── */
-    .header-table {
-        width: 100%;
-        border-bottom: 2px solid #1a3a6b;
-        padding-bottom: 10px;
-        margin-bottom: 4px;
-    }
+    .meta { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    .meta td { border: 1px solid #9aa7b8; padding: 5px 7px; font-size: 8.5px; width: 25%; }
+    .meta .lbl { display: block; font-size: 7px; font-weight: bold; letter-spacing: .8px; text-transform: uppercase; color: #5a6a7e; margin-bottom: 1px; }
 
-    .logo-cell {
-        width: 82px;
-        vertical-align: middle;
-        padding-right: 10px;
-    }
+    .section { font-size: 9.5px; font-weight: bold; letter-spacing: .8px; text-transform: uppercase; color: #0e2242;
+               border-left: 4px solid #c2560c; padding-left: 7px; margin: 14px 0 6px; }
 
-    .header-center {
-        text-align: center;
-        vertical-align: middle;
-        padding: 0 14px;
-    }
+    .stats { width: 100%; border-collapse: collapse; }
+    .stats td { border: 1px solid #9aa7b8; text-align: center; padding: 6px 4px; width: 20%; }
+    .stats .num { font-size: 15px; font-weight: bold; color: #0e2242; }
+    .stats .lbl { font-size: 7.5px; letter-spacing: .6px; text-transform: uppercase; color: #5a6a7e; }
 
-    .gov-label {
-        font-size: 8.5pt;
-        letter-spacing: 1.2px;
-        text-transform: uppercase;
-        color: #5e7292;
-        margin-bottom: 4px;
-    }
+    table.cases { width: 100%; border-collapse: collapse; }
+    table.cases th { background: #1a3a6b; color: #fff; font-size: 7.5px; letter-spacing: .5px; text-transform: uppercase;
+                     border: 1px solid #1a3a6b; padding: 5px 4px; }
+    table.cases td { border: 1px solid #9aa7b8; padding: 4px 5px; font-size: 8.5px; vertical-align: top; }
+    table.cases tr.alt td { background: #f4f6fa; }
+    .c { text-align: center; }
+    .nowrap { white-space: nowrap; }
+    .empty { padding: 18px; font-style: italic; color: #5a6a7e; }
 
-    .doc-title {
-        font-size: 17pt;
-        font-weight: bold;
-        color: #0e2242;
-        font-family: Georgia, "Times New Roman", serif;
-        line-height: 1.2;
-    }
+    .cert { margin-top: 14px; font-size: 8.5px; line-height: 1.5; text-align: justify; }
+    .sign { width: 100%; border-collapse: collapse; margin-top: 26px; page-break-inside: avoid; }
+    .sign td { width: 50%; vertical-align: top; font-size: 8.5px; padding: 0; }
+    .sign .sigblock { width: 230px; margin: 0 auto; }
+    .sign .sig-gap { height: 36px; }
+    .sign .line { margin-top: 34px; width: 230px; border-top: 1px solid #111; text-align: center; padding-top: 3px; }
 
-    .doc-subtitle {
-        font-size: 10pt;
-        color: #5a6a7e;
-        margin-top: 3px;
-    }
-
-    .report-tag-cell {
-        width: 80px;
-        vertical-align: middle;
-        text-align: right;
-    }
-
-    .report-tag {
-        display: inline-block;
-        background: #1a3a6b;
-        color: #ffffff;
-        font-size: 7.5pt;
-        font-weight: bold;
-        letter-spacing: 1px;
-        text-transform: uppercase;
-        padding: 4px 8px;
-        border-radius: 3px;
-    }
-
-    .accent-line {
-        height: 3px;
-        background-color: #c9a83c;
-        margin-bottom: 14px;
-    }
-
-    /* ── META INFO ── */
-    .meta-table {
-        width: 100%;
-        margin-bottom: 14px;
-        border: 1px solid #d4dbe8;
-        background: #f7f9fc;
-    }
-
-    .meta-table td {
-        padding: 9px 14px;
-        font-size: 10pt;
-        vertical-align: top;
-        border-right: 1px solid #d4dbe8;
-    }
-
-    .meta-table td:last-child { border-right: none; }
-
-    .meta-lbl {
-        font-size: 7.5pt;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #7a8a9e;
-        margin-bottom: 2px;
-        font-weight: bold;
-    }
-
-    .meta-val {
-        font-weight: bold;
-        color: #1a2535;
-        font-size: 10.5pt;
-    }
-
-    /* ── SECTION HEADING ── */
-    .section-heading {
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 11.5pt;
-        font-weight: bold;
-        color: #0e2242;
-        border-bottom: 1px solid #d4dbe8;
-        padding-bottom: 5px;
-        margin-top: 16px;
-        margin-bottom: 10px;
-    }
-
-    /* ── STAT CARDS ── */
-    .stats-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-bottom: 16px;
-    }
-
-    .stat-box {
-        border: 1px solid #d4dbe8;
-        border-top: 3px solid #1a3a6b;
-        padding: 10px 12px;
-        background: #fafcff;
-        text-align: center;
-    }
-
-    .stat-box.orange { border-top-color: #b55e00; }
-    .stat-box.slate  { border-top-color: #4a6080; }
-    .stat-box.green  { border-top-color: #0e7c45; }
-
-    .stat-num {
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 26pt;
-        font-weight: bold;
-        color: #0e2242;
-        line-height: 1;
-    }
-
-    .stat-lbl {
-        font-size: 7.5pt;
-        text-transform: uppercase;
-        letter-spacing: 0.8px;
-        color: #7a8a9e;
-        margin-top: 4px;
-        font-weight: bold;
-    }
-
-    /* ── CASE TABLE ── */
-    table.cases {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 10pt;
-    }
-
-    table.cases thead tr { background: #1a3a6b; }
-
-    table.cases thead th {
-        color: #ffffff;
-        padding: 9px 10px;
-        text-align: left;
-        font-size: 8.5pt;
-        font-weight: bold;
-        letter-spacing: 0.4px;
-        border: 1px solid #122d54;
-    }
-
-    table.cases tbody td { vertical-align: middle; }
-
-    table.cases tbody tr:last-child td { border-bottom: 2px solid #d4dbe8; }
-
-    .status {
-        display: inline-block;
-        padding: 2px 7px;
-        border-radius: 3px;
-        font-size: 8.5pt;
-        font-weight: bold;
-        letter-spacing: 0.3px;
-        text-transform: uppercase;
-    }
-    .status.pending     { background: #fff1ca; color: #7a4f00; }
-    .status.in-progress { background: #dce8ff; color: #1a3a6b; }
-    .status.resolved    { background: #d4f5e2; color: #0a6035; }
-
-    /* ── NOTES ── */
-    .notes-table {
-        width: 100%;
-        margin-top: 16px;
-        border-collapse: collapse;
-    }
-
-    .note-box {
-        border: 1px solid #d4dbe8;
-        padding: 10px 12px;
-        background: #fafcff;
-        font-size: 9.5pt;
-        color: #3a4e68;
-        line-height: 1.55;
-        vertical-align: top;
-    }
-
-    .note-title {
-        font-size: 7.5pt;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #7a8a9e;
-        font-weight: bold;
-        margin-bottom: 5px;
-    }
-
-    /* ── SIGNATURES ── */
-    .sig-table {
-        width: 70%;
-        margin: 24px auto 0;
-        border-collapse: collapse;
-    }
-
-    .sig-cell {
-        width: 50%;
-        padding: 0 24px;
-        vertical-align: top;
-        text-align: center;
-    }
-
-    .sig-label {
-        font-size: 8pt;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #7a8a9e;
-        margin-bottom: 52px;
-        font-weight: bold;
-    }
-
-    .sig-line {
-        border-top: 1px solid #2c3e55;
-        margin-bottom: 6px;
-    }
-
-    .sig-name {
-        font-weight: bold;
-        font-size: 10.5pt;
-        color: #0e2242;
-        text-transform: uppercase;
-    }
-
-    .sig-role {
-        font-size: 9pt;
-        color: #5a6a7e;
-        margin-top: 1px;
-    }
-
-    /* ── FOOTER ── */
-    .doc-footer {
-        margin-top: 20px;
-        padding-top: 8px;
-        border-top: 1px solid #d4dbe8;
-        text-align: center;
-        font-size: 8pt;
-        color: #8a9bb0;
-        letter-spacing: 0.3px;
-    }
-
-    .page-break { page-break-before: always; }
+    .footer { position: fixed; left: 46px; right: 46px; bottom: 24px; border-top: 1px solid #9aa7b8; padding-top: 4px;
+              font-size: 7.5px; color: #5a6a7e; }
 </style>
 </head>
 <body>
 
-<!-- HEADER -->
-<table class="header-table" cellpadding="0" cellspacing="0">
-    <tr>
-        <td class="logo-cell">
-            <img src="' . $logoDataUri . '" alt="GabayBatas Logo" style="width:72px;height:72px;display:block;">
-        </td>
-        <td class="header-center">
-            <div class="gov-label">Republic of the Philippines &bull; City of Catbalogan, Samar</div>
-            <div class="doc-title">GabayBatas Legal Information &amp; Referral System</div>
-            <div class="doc-subtitle">' . htmlspecialchars($reportTitle) . ' &mdash; Official Barangay Document</div>
-        </td>
-        <td class="report-tag-cell">
-            <span class="report-tag">' . strtoupper($reportType) . '</span>
-        </td>
-    </tr>
-</table>
-
-<div class="accent-line"></div>
-
-<!-- META INFO -->
-<table class="meta-table" cellpadding="0" cellspacing="0">
-    <tr>
-        <td style="width:40%;">
-            <div class="meta-lbl">Report Period</div>
-            <div class="meta-val">' . htmlspecialchars($reportPeriod) . '</div>
-        </td>
-        <td style="width:35%;">
-            <div class="meta-lbl">Date Generated</div>
-            <div class="meta-val">' . htmlspecialchars($generatedAt) . '</div>
-        </td>
-        <td style="width:25%;">
-            <div class="meta-lbl">Total Records</div>
-            <div class="meta-val">' . $caseCount . ' ' . ($caseCount === 1 ? 'case' : 'cases') . '</div>
-        </td>
-    </tr>
-</table>
-
-<div style="margin:0 0 14px;border:1px solid #d4dbe8;background:#fafcff;padding:8px 12px;font-size:9pt;color:#3a4e68;">
-    <strong style="display:inline-block;margin-right:6px;color:#0e2242;">Applied Filters:</strong>
-    ' . htmlspecialchars($filterSummaryText) . '
+<div class="footer">
+    <table style="width:100%;border-collapse:collapse;"><tr>
+        <td>Barangay ' . $e(KP_BARANGAY_NAME) . ', City of ' . $e(KP_MUNICIPALITY) . ', ' . $e(KP_PROVINCE) . ' &bull; Generated ' . $e($generatedAt) . ' through GabayBatas</td>
+    </tr></table>
 </div>
 
-<!-- CASE STATISTICS -->
-<div class="section-heading">Case Statistics</div>
+<table class="head"><tr>
+    <td class="seal">' . $seal('seal_city_catbalogan.png') . '</td>
+    <td class="lgu">
+        Republic of the Philippines<br>
+        PROVINCE OF ' . $e($upper(KP_PROVINCE)) . '<br>
+        CITY OF ' . $e($upper(KP_MUNICIPALITY)) . '<br>
+        <b>BARANGAY ' . $e($upper(KP_BARANGAY_NAME)) . '</b>
+        <div class="office">OFFICE OF THE PUNONG BARANGAY</div>
+    </td>
+    <td class="seal">' . $seal('seal_barangay_munoz.png') . '</td>
+</tr></table>
+<div class="rule"></div>
 
-<table class="stats-table" cellpadding="0" cellspacing="0">
-    <tr>
-        <td style="width:25%;padding-right:5px;">
-            <div class="stat-box">
-                <div class="stat-num">' . $totalCases . '</div>
-                <div class="stat-lbl">Total Cases</div>
-            </div>
-        </td>
-        <td style="width:25%;padding:0 3px;">
-            <div class="stat-box orange">
-                <div class="stat-num">' . $pendingCases . '</div>
-                <div class="stat-lbl">Pending</div>
-            </div>
-        </td>
-        <td style="width:25%;padding:0 3px;">
-            <div class="stat-box slate">
-                <div class="stat-num">' . $inProgCases . '</div>
-                <div class="stat-lbl">In Progress</div>
-            </div>
-        </td>
-        <td style="width:25%;padding-left:5px;">
-            <div class="stat-box green">
-                <div class="stat-num">' . $resolvedCases . '</div>
-                <div class="stat-lbl">Resolved</div>
-            </div>
-        </td>
-    </tr>
-</table>
+<h1>' . $e($upper($reportTitle)) . '</h1>
+<div class="period">Period covered: <u>&nbsp;' . $e($reportPeriod) . '&nbsp;</u></div>
 
-<!-- CASE LIST -->
-<div class="section-heading">Case List</div>
+<table class="meta"><tr>
+    <td><span class="lbl">Prepared for</span>Barangay ' . $e(KP_BARANGAY_NAME) . '</td>
+    <td><span class="lbl">Date generated</span>' . $e($generatedAt) . '</td>
+    <td><span class="lbl">Records listed</span>' . $caseCount . ' ' . ($caseCount === 1 ? 'case' : 'cases') . '</td>
+    <td><span class="lbl">Filters applied</span>' . $e($filterSummaryText) . '</td>
+</tr></table>
 
-<table class="cases" cellpadding="0" cellspacing="0">
-    <thead>
-        <tr>
-            <th style="width:13%;">Case ID</th>
-            <th style="width:28%;">Resident Name</th>
-            <th style="width:22%;">Case Type</th>
-            <th style="width:16%;">Status</th>
-            <th style="width:21%;">Date Filed</th>
-        </tr>
-    </thead>
+<div class="section">Summary of Cases</div>
+<table class="stats"><tr>
+    <td><div class="num">' . $report['total'] . '</div><div class="lbl">Total cases</div></td>' . implode('', array_map(
+        static fn($key, $g) => '<td><div class="num">' . $report['counts'][$key] . '</div><div class="lbl">' . $e($g['label']) . '</div></td>',
+        array_keys($groups), $groups
+    )) . '
+</tr></table>
+
+<div class="section">List of Cases</div>
+<table class="cases">
+    <thead><tr>
+        <th style="width:4%;">No.</th>
+        <th style="width:9%;">Case No.</th>
+        <th style="width:20%;">Complainant</th>
+        <th style="width:20%;">Respondent</th>
+        <th style="width:16%;">Case Type</th>
+        <th style="width:19%;">Status</th>
+        <th style="width:12%;">Date Filed</th>
+    </tr></thead>
     <tbody>' . $htmlRows . '</tbody>
 </table>
 
-<!-- NOTES -->
-<table class="notes-table" cellpadding="0" cellspacing="0">
-    <tr>
-        <td class="note-box" style="width:49%;">
-            <div class="note-title">Report Notes</div>
-            This document is system-generated from the GabayBatas database.
-            It is intended for official barangay review, filing, and case management use only.
-        </td>
-        <td style="width:2%;"></td>
-        <td class="note-box" style="width:49%;">
-            <div class="note-title">Certification</div>
-            The statistics and case records reflected herein are accurate as of the generation date.
-            Any discrepancies should be reported to the system administrator.
-        </td>
-    </tr>
-</table>
-
-<!-- SIGNATURES -->
-<div class="section-heading" style="margin-top:28px;">Certification and Approval</div>
-
-<table class="sig-table" cellpadding="0" cellspacing="0">
-    <tr>
-        <td class="sig-cell">
-            <div class="sig-label">Prepared By</div>
-            <div class="sig-line"></div>
-            <div class="sig-name">Barangay Secretary</div>
-            <div class="sig-role">Report Preparation and Verification</div>
-        </td>
-        <td class="sig-cell">
-            <div class="sig-label">Approved By</div>
-            <div class="sig-line"></div>
-            <div class="sig-name">Barangay Captain</div>
-            <div class="sig-role">Official Approval and Certification</div>
-        </td>
-    </tr>
-</table>
-
-<!-- FOOTER -->
-<div class="doc-footer">
-    GabayBatas Legal Information &amp; Referral System &bull; Catbalogan City Barangay Government &bull; Official Government Record
+<div class="cert">
+    I hereby certify that the foregoing is a true and correct report of the cases recorded in the Barangay ' . $e(KP_BARANGAY_NAME) . '
+    case records for the period stated above, as of the date of generation. Archived records are not included.
 </div>
+
+<table class="sign"><tr>
+    <td><div class="sigblock">Prepared by:<div class="sig-gap"></div><div class="line"><b>' . ($preparedBy !== '' ? $e($preparedBy) : '&nbsp;') . '</b><br>' . $preparedTitle . '</div></div></td>
+    <td><div class="sigblock">Approved by:<div class="sig-gap"></div><div class="line"><b>' . $e($captain) . '</b><br>Punong Barangay</div></div></td>
+</tr></table>
 
 </body>
 </html>';
 
 // ── RENDER ────────────────────────────────────────────────────────
 $options = new Options();
-$options->set('isRemoteEnabled', true);
+$options->set('isRemoteEnabled', false);
 $options->set('isHtml5ParserEnabled', true);
-$options->set('defaultFont', 'Arial');
+$options->set('defaultFont', 'DejaVu Sans');
 $options->set('isPhpEnabled', false);
 
 $dompdf = new Dompdf($options);
-$dompdf->loadHtml($html);
+$dompdf->loadHtml($html, 'UTF-8');
 
-// 8.5in × 13in in points. Margins are handled by body padding above.
+// Long bond (8.5in × 13in); margins are set on the body.
 $dompdf->setPaper([0, 0, 612, 936], 'portrait');
 
 $dompdf->render();
+// "Page X of Y" is stamped after rendering; CSS cannot count the total pages.
+$canvas = $dompdf->getCanvas();
+$canvas->page_text(
+    $canvas->get_width() - 46 - 62, $canvas->get_height() - 22,
+    'Page {PAGE_NUM} of {PAGE_COUNT}',
+    $dompdf->getFontMetrics()->getFont('DejaVu Sans'), 7, [0.35, 0.42, 0.49]
+);
 $dompdf->stream($filename, ['Attachment' => true]);
-exit();

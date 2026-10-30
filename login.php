@@ -30,6 +30,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     elseif ($rawRole === 'barangay' || $rawRole === 'barangay official') $role = 'barangay';
                     elseif (strtolower($username) === 'admin') $role = 'admin';
                     if ($role !== '') {
+                        // Shown as "Last Login" on Manage Users (the app's login records it the same way).
+                        $loginUpdate = $conn->prepare('UPDATE users SET last_login = NOW() WHERE id = ? LIMIT 1');
+                        if ($loginUpdate) {
+                            $loginUserId = (int)($user['id'] ?? 0);
+                            $loginUpdate->bind_param('i', $loginUserId);
+                            $loginUpdate->execute();
+                            $loginUpdate->close();
+                        }
                         $_SESSION['user_id'] = $user['id'] ?? null;
                         $_SESSION['name']    = $user['name'] ?? ($user['username'] ?? $username);
                         $_SESSION['barangay']= 'Barangay Muñoz';

@@ -18,6 +18,8 @@ define('KP_MUNICIPALITY_TYPE', 'Cuidad');          // Cuidad / Munisipiyo
 define('KP_PUNONG_BARANGAY',   'HON. ULYSIS B. MACABARE');
 // Lupon Secretary (concurrently the Barangay Secretary).
 define('KP_LUPON_SECRETARY',   'CRISTEL VALLES');
+// System administrator; signs as "Prepared by" on reports generated from the admin pages.
+define('GABAYBATAS_ADMIN_NAME', 'CHRISTIAN B. ALBOS');
 
 // ─── KP Status Definitions ──────────────────────────────────────────────────
 // Each KP status maps to the existing cases.status enum value.
@@ -93,10 +95,26 @@ if (!function_exists('kp_status_to_parent')) {
 }
 
 if (!function_exists('kp_status_color')) {
+    /**
+     * Badge colour of a status, by stage family so tables are easy to read:
+     * intake/review (amber), hearings: mediation, conciliation, arbitration
+     * (indigo), and after a result: settlement, compliance, execution,
+     * disposition (green).
+     */
     function kp_status_color(string $kpStatus): string
     {
-        $all = kp_statuses();
-        return $all[$kpStatus]['color'] ?? '#6b7280';
+        $families = [
+            'intake'       => '#d97706',
+            'mediation'    => '#6366f1',
+            'conciliation' => '#6366f1',
+            'arbitration'  => '#6366f1',
+            'settlement'   => '#10b981',
+            'compliance'   => '#10b981',
+            'execution'    => '#10b981',
+            'disposition'  => '#10b981',
+        ];
+        $stage = kp_statuses()[$kpStatus]['stage'] ?? '';
+        return $families[$stage] ?? '#6b7280';
     }
 }
 

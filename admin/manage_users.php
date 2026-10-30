@@ -4,6 +4,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') { header('Locati
 require_once '../config/database.php';
 require_once '../config/barangays.php';
 require_once '../config/archive.php';
+require_once '../includes/pagination.php';
 gabaybatas_archive_ensure_schema($conn);
 
 $userColumns = [];
@@ -38,7 +39,7 @@ $statusFilter = trim($_GET['status'] ?? '');
 $barangayFilter = '';
 $sort = trim($_GET['sort'] ?? 'newest');
 $pageNo = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 10;
+$perPage = gabaybatas_per_page(10);
 $archived = isset($_GET['archived']) ? (int)$_GET['archived'] : 0;
 
 $conditions = [];
@@ -497,23 +498,12 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
             </table>
         </div>
 
-        <div class="um-footer">
-            <div class="um-page-meta">Showing <?= $totalFiltered > 0 ? ($offset + 1) : 0 ?>-<?= min($offset + $perPage, $totalFiltered) ?> of <?= $totalFiltered ?> users</div>
-            <div class="um-pagination">
-                <?php
-                $queryBaseLink = [
-                    'search' => $search,
-                    'role' => $roleFilter,
-                    'status' => $statusFilter,
-                    'barangay' => $barangayFilter,
-                    'sort' => $sort,
-                ];
-                ?>
-                <a class="um-page-btn <?= $pageNo <= 1 ? 'disabled' : '' ?>" href="?<?= htmlspecialchars(http_build_query($queryBaseLink + ['page' => max(1, $pageNo - 1)])) ?>">Prev</a>
-                <span class="um-page-current">Page <?= $pageNo ?> / <?= $totalPages ?></span>
-                <a class="um-page-btn <?= $pageNo >= $totalPages ? 'disabled' : '' ?>" href="?<?= htmlspecialchars(http_build_query($queryBaseLink + ['page' => min($totalPages, $pageNo + 1)])) ?>">Next</a>
-            </div>
-        </div>
+        <?php gabaybatas_pagination($totalFiltered, $pageNo, $perPage, [
+            'search' => $search,
+            'role' => $roleFilter,
+            'status' => $statusFilter,
+            'sort' => $sort,
+        ], 'users'); ?>
     </div>
 
 </div>

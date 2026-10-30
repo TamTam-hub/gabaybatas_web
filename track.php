@@ -45,7 +45,7 @@ if ($searchQuery !== '') {
         }
 
         // Fetch safe public timeline events
-        $mStmt = $conn->prepare("SELECT event_type, title AS summary, created_at FROM kp_timeline_events WHERE case_id = ? ORDER BY id DESC LIMIT 8");
+        $mStmt = $conn->prepare("SELECT event_type, title AS summary, created_at FROM kp_timeline_events WHERE case_id = ? AND event_type <> 'details_corrected' ORDER BY id DESC LIMIT 8");
         if ($mStmt) {
             $mStmt->bind_param('i', $caseRowId);
             $mStmt->execute();

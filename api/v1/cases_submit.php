@@ -52,14 +52,13 @@ if ($name === '' || $complainantAddress === '' || $complainantLocation === '' ||
     api_error('Missing required fields. Required: complainant name, age, complete address, respondent name, respondent complete address, contact, case type, and complaint reason.', 422);
 }
 
-$description = sprintf(
-    'Ako po hi %s, %s anyos, ngan naukoy ha %s. Ginrereklamo ko hi %s, nga naukoy ha %s, tungod %s. Karuyag ko unta ipatawag hiya ha barangay basi magkastorya kami hin maopay.',
+$description = gabaybatas_complaint_statement(
     $name,
     $complainantAge,
     $complainantLocation,
     $complainedPerson,
     $respondentLocation,
-    rtrim($description, " \t\n\r\0\x0B.")
+    $description
 );
 
 $barangay = api_require_barangay($barangay);
@@ -205,6 +204,8 @@ if ($complainedColumn !== null) {
 foreach ([
     'complainant_address' => $complainantAddress,
     'respondent_address' => $respondentAddress,
+    'complainant_purok' => mb_substr($complainantLocation, 0, 50),
+    'respondent_purok' => mb_substr($respondentLocation, 0, 50),
 ] as $column => $value) {
     if (api_has_column($caseColumns, $column)) {
         $insertColumns[] = $column;

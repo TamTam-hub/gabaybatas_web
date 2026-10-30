@@ -119,12 +119,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->bind_param('ssissi', $status, $reviewerNote, $reviewerId, $reviewedAt, $reviewedAt, $verificationId);
         if ($stmt->execute()) {
             $message = 'Verification review saved.';
+            // Tell the resident about the decision (read by the app through api/v1/notifications.php).
+            $owner = $conn->prepare('SELECT user_id FROM residency_verifications WHERE id = ? LIMIT 1');
+            $owner->bind_param('i', $verificationId);
+            $owner->execute();
+            $residentId = (int)($owner->get_result()->fetch_assoc()['user_id'] ?? 0);
+            $owner->close();
+            $noteLine = $reviewerNote !== '' ? ' Note from the barangay: ' . $reviewerNote : '';
+            $notice = [
+                'approved' => ['Residency verified', 'Your residency in Barangay Muñoz has been verified. You can now submit a case.' . $noteLine],
+                'resubmit' => ['Resubmission needed', 'Please resubmit your residency verification in the app.' . $noteLine],
+                'rejected' => ['Residency verification rejected', 'Your residency verification was not approved.' . $noteLine . ' You may submit a new request.'],
+            ][$status];
+            if ($residentId > 0) {
+                $notify = $conn->prepare("INSERT INTO api_notifications (user_id, title, message, type, created_at) VALUES (?, ?, ?, 'residency_verification', ?)");
+                if ($notify) {
+                    $notify->bind_param('isss', $residentId, $notice[0], $notice[1], $reviewedAt);
+                    $notify->execute();
+                    $notify->close();
+                }
+            }
         } else {
             $message = 'Unable to save the review.';
             $messageType = 'error';
         }
         $stmt->close();
     }
+
+    // Reload with GET so refreshing the page does not send the review again.
+    $_SESSION['rv_flash'] = ['message' => $message, 'type' => $messageType];
+    header('Location: ' . ($_SERVER['REQUEST_URI'] ?? 'residency_verifications.php'));
+    exit();
+}
+if (isset($_SESSION['rv_flash'])) {
+    $message = (string)$_SESSION['rv_flash']['message'];
+    $messageType = (string)$_SESSION['rv_flash']['type'];
+    unset($_SESSION['rv_flash']);
 }
 
 $statusFilter = trim((string)($_GET['status'] ?? 'pending'));
@@ -144,11 +174,12 @@ if ($searchTerm !== '') {
         OR u.email LIKE '%{$safeSearch}%')";
 }
 $where = $whereParts ? ' WHERE ' . implode(' AND ', $whereParts) : '';
-$result = $conn->query("SELECT v.*, u.email,
+$result = $conn->query("SELECT v.*, u.email, r.name AS reviewer_name,
     (SELECT GROUP_CONCAT(CONCAT(d.id, '|', d.document_type, '|', d.original_filename, '|', d.mime_type) ORDER BY d.id SEPARATOR ';;')
      FROM residency_verification_documents d WHERE d.verification_id = v.id) AS document_items
     FROM residency_verifications v
     LEFT JOIN users u ON u.id = v.user_id
+    LEFT JOIN users r ON r.id = v.reviewed_by
     {$where}
     ORDER BY v.id DESC");
 $rows = [];
@@ -225,11 +256,11 @@ require_once '../includes/sidebar_admin.php';
                 <tr>
                     <td><div class="rv-person"><span class="rv-avatar"><?= htmlspecialchars(strtoupper(substr((string)$row['full_name'], 0, 1))) ?></span><span><strong><?= htmlspecialchars((string)$row['full_name']) ?></strong><small><?= htmlspecialchars((string)($row['email'] ?? '')) ?></small></span></div></td>
                     <td><strong><?= htmlspecialchars($pageBarangay) ?></strong><small class="rv-muted"><?= htmlspecialchars((string)$row['complete_address']) ?></small></td>
-                    <td><strong><?= htmlspecialchars((string)$row['government_id_type']) ?></strong><?php if (!empty($row['government_id_last4'])): ?><small class="rv-muted">Ending <?= htmlspecialchars((string)$row['government_id_last4']) ?></small><?php endif; ?></td>
+                    <td><strong><?= htmlspecialchars((string)$row['government_id_type']) ?></strong><?php if (!empty($row['government_id_last4'])): ?><small class="rv-muted">Ending <?= htmlspecialchars((string)$row['government_id_last4']) ?></small><?php endif; ?><small class="rv-muted">Born <?= !empty($row['date_of_birth']) && strtotime((string)$row['date_of_birth']) ? htmlspecialchars(date('M d, Y', strtotime((string)$row['date_of_birth']))) : '—' ?></small></td>
                     <td><div class="rv-docs"><?php foreach ($row['documents'] as $document): $documentLabel = $document['type'] === 'proof_of_residence' ? 'Barangay Indigency' : 'Government ID'; ?><a href="verification_document.php?id=<?= $document['id'] ?>" class="rv-document-link" data-document-url="verification_document.php?id=<?= $document['id'] ?>" data-document-mime="<?= htmlspecialchars($document['mime'], ENT_QUOTES) ?>" data-document-title="<?= htmlspecialchars($documentLabel, ENT_QUOTES) ?>" title="Open <?= htmlspecialchars($documentLabel) ?>"><i class="uil <?= $document['type'] === 'proof_of_residence' ? 'uil-home' : 'uil-card-atm' ?>"></i><?= htmlspecialchars($documentLabel) ?></a><?php endforeach; ?><?php if (!$row['documents']): ?><span class="rv-muted">No files</span><?php endif; ?></div></td>
-                    <td><span class="rv-status <?= $statusClass ?>"><i class="uil <?= $statusClass === 'approved' ? 'uil-check' : ($statusClass === 'rejected' ? 'uil-times' : ($statusClass === 'resubmit' ? 'uil-refresh' : 'uil-clock')) ?>"></i><?= htmlspecialchars(ucfirst($rowStatus)) ?></span></td>
+                    <td><span class="rv-status <?= $statusClass ?>"><i class="uil <?= $statusClass === 'approved' ? 'uil-check' : ($statusClass === 'rejected' ? 'uil-times' : ($statusClass === 'resubmit' ? 'uil-refresh' : 'uil-clock')) ?>"></i><?= htmlspecialchars(ucfirst($rowStatus)) ?></span><?php if (!empty($row['reviewed_at'])): ?><small class="rv-muted">by <?= htmlspecialchars((string)($row['reviewer_name'] ?: 'Admin')) ?> · <?= htmlspecialchars(date('M d, Y', strtotime((string)$row['reviewed_at']))) ?></small><?php endif; ?><?php if (!empty($row['reviewer_note'])): ?><small class="rv-note">“<?= htmlspecialchars((string)$row['reviewer_note']) ?>”</small><?php endif; ?></td>
                     <td><strong><?= htmlspecialchars(date('M d, Y', strtotime((string)$row['created_at']))) ?></strong><small class="rv-muted"><?= htmlspecialchars(date('h:i A', strtotime((string)$row['created_at']))) ?></small></td>
-                    <td><details class="rv-details"><summary><i class="uil uil-edit"></i> Review</summary><form method="post" class="rv-review-form"><button type="button" class="rv-review-close" aria-label="Close review form"><i class="uil uil-times"></i></button><input type="hidden" name="verification_id" value="<?= (int)$row['id'] ?>"><label>Decision<select name="status" required><option value="approved">Approve</option><option value="resubmit">Request resubmission</option><option value="rejected">Reject</option></select></label><label>Note<textarea name="reviewer_note" placeholder="Add a note for the resident"><?= htmlspecialchars((string)($row['reviewer_note'] ?? '')) ?></textarea></label><button type="submit" class="rv-save-review"><i class="uil uil-check"></i> Save review</button></form></details><?php if ($rowStatus === 'rejected' && $statusFilter === 'rejected'): ?><form method="post" class="rv-delete-form"><input type="hidden" name="action" value="delete_rejected"><input type="hidden" name="verification_id" value="<?= (int)$row['id'] ?>"><button type="button" class="rv-delete-button" data-delete-id="<?= (int)$row['id'] ?>" data-delete-name="<?= htmlspecialchars((string)$row['full_name'], ENT_QUOTES) ?>"><i class="uil uil-trash-alt"></i> Delete</button></form><?php endif; ?></td>
+                    <td><details class="rv-details"><summary><i class="uil uil-edit"></i> Review</summary><form method="post" class="rv-review-form"><button type="button" class="rv-review-close" aria-label="Close review form"><i class="uil uil-times"></i></button><input type="hidden" name="verification_id" value="<?= (int)$row['id'] ?>"><div class="rv-review-current">Current decision: <b><?= htmlspecialchars(ucfirst($rowStatus)) ?></b></div><label>Decision<select name="status" required><option value="" selected disabled>Choose a decision…</option><option value="approved">Approve</option><option value="resubmit">Request resubmission</option><option value="rejected">Reject</option></select></label><label>Note<textarea name="reviewer_note" placeholder="Required when rejecting or requesting resubmission. The resident will see this note."></textarea></label><button type="submit" class="rv-save-review"><i class="uil uil-check"></i> Save review</button></form></details><?php if ($rowStatus === 'rejected' && $statusFilter === 'rejected'): ?><form method="post" class="rv-delete-form"><input type="hidden" name="action" value="delete_rejected"><input type="hidden" name="verification_id" value="<?= (int)$row['id'] ?>"><button type="button" class="rv-delete-button" data-delete-id="<?= (int)$row['id'] ?>" data-delete-name="<?= htmlspecialchars((string)$row['full_name'], ENT_QUOTES) ?>"><i class="uil uil-trash-alt"></i> Delete</button></form><?php endif; ?></td>
                 </tr>
             <?php endforeach; ?>
             </tbody></table></div>
@@ -361,13 +392,15 @@ document.addEventListener('keydown', event => {
 </script>
 
 <style>
-8);backdrop-filter:blur(3px)}.rv-modal-card{position:relative;z-index:1;display:flex;flex-direction:column;width:min(920px,100%);height:min(760px,90vh);overflow:hidden;border:1px solid rgba(255,255,255,.3);border-radius:14px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.3)}.rv-modal-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 18px;border-bottom:1px solid #e2e8f0;background:#f8fafc}.rv-modal-head span{display:block;color:#0d9488;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}.rv-modal-head h2{margin-top:2px;color:#102a43;font-family:'Source Serif 4',serif;font-size:20px}.rv-modal-close{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:8px;background:#e2e8f0;color:#475569;font-size:19px;cursor:pointer}.rv-modal-close:hover{background:#fecdd3;color:#be123c}.rv-modal-body{flex:1;background:#e2e8f0;padding:12px}.rv-modal-body iframe{display:block;width:100%;height:100%;border:0;border-radius:8px;background:#fff}@keyframes rvModalIn{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}.rv-empty{display:flex;align-items:center;flex-direction:column;gap:5px;padding:58px 20px;color:#64748b}.rv-empty i{font-size:34px;color:#5eead4}.rv-empty strong{color:#334155;font-size:14px}.rv-empty span{font-size:12px}@media(max-width:900px){.rv-stats{grid-template-columns:repeat(2,1fr)}.rv-hero{align-items:flex-start;flex-direction:column}.rv-hero-mark{white-space:normal}}@media(max-width:560px){.rv-body{padding:16px 12px 30px}.rv-stats{gap:8px}.rv-stat{padding:11px}.rv-panel-head{padding:16px}.rv-controls{padding:0 16px 14px}.rv-search-form{max-width:none}.rv-tabs{gap:5px}.rv-hero{padding:19px}.rv-hero h1{font-size:25px}.rv-document-modal{padding:10px}.rv-modal-card{height:92vh}}
+.rv-modal-card{position:relative;z-index:1;display:flex;flex-direction:column;width:min(920px,100%);height:min(760px,90vh);overflow:hidden;border:1px solid rgba(255,255,255,.3);border-radius:14px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.3)}.rv-modal-head{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 18px;border-bottom:1px solid #e2e8f0;background:#f8fafc}.rv-modal-head span{display:block;color:#0d9488;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase}.rv-modal-head h2{margin-top:2px;color:#102a43;font-family:'Source Serif 4',serif;font-size:20px}.rv-modal-close{display:grid;place-items:center;width:34px;height:34px;border:0;border-radius:8px;background:#e2e8f0;color:#475569;font-size:19px;cursor:pointer}.rv-modal-close:hover{background:#fecdd3;color:#be123c}.rv-modal-body{flex:1;background:#e2e8f0;padding:12px}.rv-modal-body iframe{display:block;width:100%;height:100%;border:0;border-radius:8px;background:#fff}@keyframes rvModalIn{from{opacity:0;transform:scale(.98)}to{opacity:1;transform:scale(1)}}.rv-empty{display:flex;align-items:center;flex-direction:column;gap:5px;padding:58px 20px;color:#64748b}.rv-empty i{font-size:34px;color:#5eead4}.rv-empty strong{color:#334155;font-size:14px}.rv-empty span{font-size:12px}@media(max-width:900px){.rv-stats{grid-template-columns:repeat(2,1fr)}.rv-hero{align-items:flex-start;flex-direction:column}.rv-hero-mark{white-space:normal}}@media(max-width:560px){.rv-body{padding:16px 12px 30px}.rv-stats{gap:8px}.rv-stat{padding:11px}.rv-panel-head{padding:16px}.rv-controls{padding:0 16px 14px}.rv-search-form{max-width:none}.rv-tabs{gap:5px}.rv-hero{padding:19px}.rv-hero h1{font-size:25px}.rv-document-modal{padding:10px}.rv-modal-card{height:92vh}}
 </style>
 <style>
 .rv-modal-actions{display:flex;align-items:center;gap:10px}.rv-zoom-tools{display:none;align-items:center;gap:5px}.rv-zoom-tools.is-visible{display:flex}.rv-zoom-tools button{height:28px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font:inherit;font-size:12px;font-weight:700;cursor:pointer}.rv-zoom-tools button[data-zoom="in"],.rv-zoom-tools button[data-zoom="out"]{width:28px;font-size:17px;line-height:1}.rv-zoom-tools button[data-zoom="reset"]{padding:0 8px;font-size:10px}.rv-zoom-tools button:hover{border-color:#14b8a6;color:#0f766e;background:#f0fdfa}.rv-zoom-tools span{min-width:42px;text-align:center;color:#64748b;font-size:10px;font-weight:700}.rv-modal-body{display:flex;align-items:center;justify-content:center;overflow:auto}.rv-modal-body img{display:none;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;transform-origin:center center;transition:transform .16s ease;cursor:zoom-in}.rv-modal-body img.is-visible{display:block}.rv-modal-body iframe{display:none}.rv-modal-body iframe.is-visible{display:block}.rv-document-link{cursor:pointer}.rv-document-link:hover{text-decoration:none!important}
 .rv-delete-form{margin-top:8px}.rv-delete-button{display:inline-flex;align-items:center;gap:5px;border:1px solid #fecdd3;border-radius:6px;padding:7px 10px;background:#fff1f2;color:#be123c;font:inherit;font-size:10px;font-weight:700;cursor:pointer}.rv-delete-button:hover{background:#ffe4e6;border-color:#fda4af;color:#9f1239}
 .rv-hero{padding:16px 24px;margin-bottom:14px}.rv-hero p{margin-top:0}.rv-hero .rv-kicker{margin-bottom:0}
 .rv-delete-modal{position:fixed;inset:0;z-index:400;display:none;align-items:center;justify-content:center;padding:22px}.rv-delete-modal.is-open{display:flex;animation:rvModalIn .18s ease-out}.rv-delete-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.62)}.rv-delete-card{position:relative;width:min(100%,430px);padding:30px;border-radius:16px;background:#fff;box-shadow:0 24px 70px rgba(15,23,42,.25);text-align:center}.rv-delete-icon{width:52px;height:52px;display:grid;place-items:center;margin:0 auto 14px;border-radius:50%;background:#fff1f2;color:#e11d48;font-size:24px}.rv-delete-close{position:absolute;top:14px;right:14px;width:30px;height:30px;border:0;border-radius:7px;background:#f1f5f9;color:#64748b;cursor:pointer}.rv-delete-close:hover{background:#e2e8f0;color:#0f172a}.rv-delete-card h2{font-family:'Source Serif 4',serif;color:#102a43;font-size:22px}.rv-delete-card p{margin:9px auto 22px;max-width:340px;color:#64748b;font-size:12px;line-height:1.6}.rv-delete-card p strong{color:#334155}.rv-delete-actions{display:flex;justify-content:center;gap:9px}.rv-delete-actions button{border-radius:7px;padding:9px 14px;font:inherit;font-size:11px;font-weight:700;cursor:pointer}.rv-delete-cancel{border:1px solid #cbd5e1;background:#fff;color:#475569}.rv-delete-cancel:hover{background:#f8fafc}.rv-delete-confirm{border:0;background:#e11d48;color:#fff}.rv-delete-confirm:hover{background:#be123c}
+.rv-note{max-width:190px;margin-top:4px!important;color:#475569!important;font-style:italic;white-space:normal}
+.rv-review-current{font-size:11px;color:#64748b}.rv-review-current b{color:#1e293b}
 @media(max-width:560px){.rv-modal-actions{gap:5px}.rv-zoom-tools button[data-zoom="reset"]{display:none}.rv-modal-head{padding:12px}.rv-modal-head h2{font-size:17px}}
 </style>
 <style>
