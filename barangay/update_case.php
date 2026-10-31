@@ -36,6 +36,9 @@ if ($caseIdParam === '') {
 }
 
 $caseId = (int)($case['id'] ?? 0);
+// Opened from Case Process (Quick Actions): Back, Cancel and saving return there.
+$fromProcess = ($_GET['from'] ?? '') === 'process' && $caseId > 0;
+$returnUrl = $fromProcess ? 'case_process.php?id=' . $caseId : 'cases.php';
 $actor = [
 	'name' => (string)($_SESSION['name'] ?? 'Barangay Official'),
 	'role' => 'Barangay',
@@ -57,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $case && $action === 'details') {
 	$form = gabaybatas_intake_from_post();
 	$errors = gabaybatas_case_edit_save($conn, $case, $state, $form, $actor);
 	if (!$errors) {
-		header('Location: cases.php?updated=1');
+		header('Location: ' . ($fromProcess ? $returnUrl : 'cases.php?updated=1'));
 		exit();
 	}
 }
@@ -67,7 +70,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $case && $action === 'status') {
 		$conn, $case, trim((string)($_POST['status'] ?? '')), (string)($_POST['change_reason'] ?? ''), $actor
 	);
 	if ($statusError === '') {
-		header('Location: cases.php?updated=1');
+		header('Location: ' . ($fromProcess ? $returnUrl : 'cases.php?updated=1'));
 		exit();
 	}
 }
@@ -115,7 +118,7 @@ $statusColor = kp_status_color($currentStatus);
 					Correct the details of a case.
 				<?php endif; ?>
 			</p>
-			<a href="cases.php" class="acs-back-btn"><i class="uil uil-arrow-left"></i> Back to Cases</a>
+			<a href="<?= $returnUrl ?>" class="acs-back-btn"><i class="uil uil-arrow-left"></i> Back to <?= $fromProcess ? 'Case Process' : 'Cases' ?></a>
 		</div>
 
 		<?php if ($error !== ''): ?>
@@ -145,7 +148,7 @@ $statusColor = kp_status_color($currentStatus);
 				]); ?>
 
 				<div class="acs-actions">
-					<a href="cases.php" class="acs-cancel">Cancel</a>
+					<a href="<?= $returnUrl ?>" class="acs-cancel">Cancel</a>
 					<button type="submit" class="acs-save"><i class="uil uil-save"></i> Save Corrections</button>
 				</div>
 			</form>
@@ -200,6 +203,7 @@ $statusColor = kp_status_color($currentStatus);
 				: window.confirm(options.title + '\n\n' + options.message);
 			if (!ok) return;
 			confirmed = true;
+			if (window.gbLoading) window.gbLoading.show('Saving changes…');
 			form.submit();
 		});
 	}

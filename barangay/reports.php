@@ -172,7 +172,7 @@ $allDataUrl = 'generate_report.php?period=all';
                                 <td><?= htmlspecialchars((string)($row['complained_person'] ?: '—')) ?></td>
                                 <td><?= htmlspecialchars((string)($row['case_type'] ?: '—')) ?></td>
                                 <td><span class="status-badge" style="background:<?= $color ?>18;color:<?= $color ?>;border:1px solid <?= $color ?>33;"><?= htmlspecialchars(kp_status_label($row['kp_status'])) ?></span></td>
-                                <td><?= $dateTs ? date('M d, Y h:i A', $dateTs) : 'N/A' ?></td>
+                                <td class="rp-date"><?php if ($dateTs): ?><strong><?= date('M d, Y', $dateTs) ?></strong><small><?= date('h:i A', $dateTs) ?></small><?php else: ?>N/A<?php endif; ?></td>
                             </tr>
                             <?php endforeach; ?>
                         <?php else: ?>
@@ -245,7 +245,23 @@ $allDataUrl = 'generate_report.php?period=all';
 .table-dashboard th { background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: .7px; font-weight: 700; padding: 10px 12px; border-bottom: 1px solid #e2e8f0; text-align: left; }
 .table-dashboard td { font-size: 13px; color: #1f2937; padding: 11px 12px; border-bottom: 1px solid #eef2f7; }
 .table-dashboard tr:last-child td { border-bottom: none; }
-.card-box .gb-pg { margin: 14px -24px -22px; border-radius: 0 0 8px 8px; }
+.card-box .gb-pg { margin: 14px -24px -22px; border-radius: 0 0 14px 14px; }
+/* UI refresh: clearer filters, one navy button style */
+.gb-ui .page-header-sub { font-size: 13.5px; color: #4f5f75; }
+.gb-ui .filter-label { font-size: 13px; text-transform: none; letter-spacing: .1px; color: #334155; }
+.gb-ui .filter-input { min-height: 42px; font-size: 14px; border: 1.5px solid #d6deea; border-radius: 10px; }
+.gb-ui .filter-input:focus { border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+.gb-ui .btn-action { min-height: 42px; padding: 10px 15px; font-size: 13.5px; font-weight: 700; border-radius: 10px; }
+.gb-ui .btn-apply { background: linear-gradient(135deg, #24508f, #0e2242); border-color: transparent; box-shadow: 0 6px 14px rgba(26,58,107,.2); }
+.gb-ui .btn-reset { border: 1.5px solid #d6deea; }
+.gb-ui .btn-download, .gb-ui .btn-all { background: #fff; color: #1a3a6b; border: 1.5px solid #c9d6ea; }
+.gb-ui .btn-download:hover, .gb-ui .btn-all:hover { background: #f6f9ff; border-color: #1a3a6b; }
+.gb-ui .applied-row { font-size: 13.5px; }
+.gb-ui .applied-pill { background: #eef3fb; border-color: #d6e2f5; color: #1a3a6b; font-size: 12.5px; }
+.gb-ui .record-count { background: #eef3fb; border-color: #d6e2f5; color: #1a3a6b; font-weight: 700; font-size: 12.5px; }
+.gb-ui .status-badge { font-size: 12px; padding: 4px 11px; }
+.rp-date strong { display: block; font-weight: 600; white-space: nowrap; }
+.rp-date small { display: block; font-size: 12.5px; color: #6f7f96; }
 .empty-row { text-align: center; color: #94a3b8; padding: 24px 10px; }
 
 .status-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 10px; font-size: 11px; font-weight: 700; white-space: nowrap; }

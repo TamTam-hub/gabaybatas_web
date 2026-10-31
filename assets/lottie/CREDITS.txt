@@ -1,0 +1,24 @@
+Animations from LottieFiles (https://lottiefiles.com), free under the Lottie Simple License
+(https://lottiefiles.com/page/license).
+
+Empty states
+empty-box.json     "Empty Box Animation" by Aadesh Kulkarni
+                   https://lottiefiles.com/free-animation/empty-box-animation-EfC20FO7YI
+search-file.json   "Search File" by Ram Bharathi
+                   https://lottiefiles.com/free-animation/search-file-4Xyy3zQKe7
+no-history.json    "No History" by Marvellous Tokunbo
+                   https://lottiefiles.com/free-animation/no-history-3SrwKm6f4K
+
+Success and loading
+success.json       "Check Mark - Success" by Travis Gregory
+                   https://lottiefiles.com/free-animation/check-mark-success-h9SJbwh6ky
+loading.json       "Loading 40 | Paperplane" by Jeffrey Christopher
+                   https://lottiefiles.com/free-animation/loading-40-paperplane-pXSmJB5J2C
+loading-dots.json  "Loading Dots Blue" by Umer Khawer
+                   https://lottiefiles.com/free-animation/loading-dots-blue-FKLnla7VWy
+
+Login page
+justice-scale.json "Justice balance law" by Rami Alshami
+                   https://lottiefiles.com/free-animation/justice-balance-law-rT06jeQVju
+
+Player: lottie-web 5.12.2 (lottie_light build), MIT License, https://github.com/airbnb/lottie-web

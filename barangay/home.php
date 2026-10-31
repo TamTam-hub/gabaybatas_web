@@ -110,14 +110,20 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
     <div class="page-body">
 
         <!-- WELCOME BANNER -->
-        <div class="welcome-banner">
-            <div>
-                <h5>Welcome back, <?= htmlspecialchars($_SESSION['name'] ?? 'Barangay Official') ?></h5>
-                <p>Here is the current status of cases under your barangay.</p>
+        <div class="welcome-banner hm-banner">
+            <div class="hm-banner-main">
+                <span class="hm-seal"><img src="../images/seal_barangay_munoz.png" alt=""></span>
+                <div>
+                    <h5>Welcome back, <?= htmlspecialchars($_SESSION['name'] ?? 'Barangay Official') ?></h5>
+                    <p>Here is the current status of cases under your barangay.</p>
+                </div>
             </div>
-            <div class="banner-date">
-                <div><?php echo date('l'); ?></div>
-                <div><?php echo date('F d, Y'); ?></div>
+            <div class="banner-date hm-date">
+                <i class="uil uil-calendar-alt"></i>
+                <div>
+                    <div><?php echo date('l'); ?></div>
+                    <strong><?php echo date('F d, Y'); ?></strong>
+                </div>
             </div>
         </div>
 
@@ -167,49 +173,39 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
         ?>
 
         <?php if (!empty($kpDeadlineAlerts) || $kpDaysLeft <= 10): ?>
-        <div class="kp-dashboard-widgets" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:20px;">
+        <div class="kp-dashboard-widgets hm-widgets">
 
             <!-- Monthly Report Widget -->
-            <?php if ($kpDaysLeft <= 10): ?>
-            <div class="card-box" style="border-left:4px solid <?= $kpDaysLeft <= 3 ? '#dc2626' : ($kpDaysLeft <= 5 ? '#d97706' : '#2563eb') ?>;">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <div style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px;
-                        background:<?= $kpDaysLeft <= 3 ? 'rgba(220,38,38,.1);color:#dc2626' : ($kpDaysLeft <= 5 ? 'rgba(217,119,6,.1);color:#d97706' : 'rgba(37,99,235,.1);color:#2563eb') ?>;">
-                        <i class="uil uil-file-graph"></i>
-                    </div>
-                    <div style="flex:1;">
-                        <strong style="font-size:14px;color:#1e293b;">Monthly Report Due</strong>
-                        <p style="margin:2px 0 0;font-size:12px;color:#64748b;">KP Monitoring Form No. 1, prepared within the first 5 days of the month</p>
-                        <p style="margin:2px 0 0;font-size:13px;color:<?= $kpDaysLeft <= 3 ? '#dc2626' : '#64748b' ?>;">
+            <?php if ($kpDaysLeft <= 10): $reportTone = $kpDaysLeft <= 3 ? 'is-red' : ($kpDaysLeft <= 5 ? 'is-amber' : 'is-navy'); ?>
+            <div class="card-box hm-widget <?= $reportTone ?>">
+                <div class="hm-widget-row">
+                    <span class="hm-widget-icon"><i class="uil uil-file-graph"></i></span>
+                    <div class="hm-widget-text">
+                        <strong>Monthly Report Due</strong>
+                        <p>KP Monitoring Form No. 1, prepared within the first 5 days of the month</p>
+                        <span class="hm-due">
                             <?php if ($kpDaysLeft <= 0): ?>
-                                ⚠ Due <strong>today</strong> (<?= date('M j', strtotime($kpDueDate)) ?>)
+                                <i class="uil uil-exclamation-triangle"></i> Due <strong>today</strong> (<?= date('M j', strtotime($kpDueDate)) ?>)
                             <?php else: ?>
-                                <?= $kpDaysLeft ?> day<?= $kpDaysLeft > 1 ? 's' : '' ?> left (<?= date('M j', strtotime($kpDueDate)) ?>)
+                                <i class="uil uil-clock"></i> <?= $kpDaysLeft ?> day<?= $kpDaysLeft > 1 ? 's' : '' ?> left (<?= date('M j', strtotime($kpDueDate)) ?>)
                             <?php endif; ?>
-                        </p>
+                        </span>
                     </div>
-                    <a href="kp_reports.php" style="padding:6px 14px;background:#2563eb;color:#fff;border-radius:6px;font-size:12px;font-weight:600;text-decoration:none;">
-                        View →
-                    </a>
+                    <a href="kp_reports.php" class="hm-widget-btn">View <i class="uil uil-arrow-right"></i></a>
                 </div>
             </div>
             <?php endif; ?>
 
             <!-- Deadline Alerts -->
             <?php if (!empty($kpDeadlineAlerts)): ?>
-            <div class="card-box" style="border-left:4px solid #f59e0b;">
-                <strong style="font-size:14px;color:#1e293b;display:block;margin-bottom:8px;">
-                    <i class="uil uil-exclamation-triangle" style="color:#f59e0b;"></i> Upcoming KP Deadlines
-                </strong>
+            <div class="card-box hm-widget is-amber">
+                <div class="hm-widget-title"><span class="hm-widget-icon"><i class="uil uil-exclamation-triangle"></i></span><strong>Upcoming KP Deadlines</strong></div>
+                <div class="hm-deadlines">
                 <?php foreach ($kpDeadlineAlerts as $alert): ?>
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:13px;">
-                    <span>
-                        <a href="case_process.php?id=<?= (int)$alert['id'] ?>" style="color:#2563eb;text-decoration:none;font-weight:600;">
-                            <?= htmlspecialchars($alert['case_id']) ?>
-                        </a>
-                        — <?= $alert['type'] ?> period ends <?= date('M j', strtotime($alert['deadline'])) ?>
-                    </span>
-                    <span style="color:<?= $alert['days_left'] <= 3 ? '#dc2626' : '#d97706' ?>;font-weight:600;">
+                <a href="case_process.php?id=<?= (int)$alert['id'] ?>" class="hm-deadline">
+                    <span class="hm-deadline-case"><?= htmlspecialchars($alert['case_id']) ?></span>
+                    <span class="hm-deadline-text"><?= $alert['type'] ?> period ends <?= date('M j', strtotime($alert['deadline'])) ?></span>
+                    <span class="hm-deadline-left <?= $alert['days_left'] <= 3 ? 'is-red' : 'is-amber' ?>">
                         <?php if ($alert['days_left'] < 0): ?>
                             Ended
                         <?php elseif ($alert['days_left'] === 0): ?>
@@ -218,8 +214,9 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
                             <?= $alert['days_left'] ?>d left
                         <?php endif; ?>
                     </span>
-                </div>
+                </a>
                 <?php endforeach; ?>
+                </div>
             </div>
             <?php endif; ?>
         </div>
@@ -227,8 +224,13 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
 
         <!-- RECENT CASES TABLE -->
         <div class="card-box">
-            <div class="section-heading">Recent Cases</div>
-            <div class="section-heading-sub">Showing the latest case entries for your barangay</div>
+            <div class="hm-table-head">
+                <div>
+                    <div class="section-heading">Recent Cases</div>
+                    <div class="section-heading-sub">Showing the latest case entries for your barangay</div>
+                </div>
+                <a href="cases.php" class="hm-all-link">View all cases <i class="uil uil-arrow-right"></i></a>
+            </div>
 
             <div class="table-wrap">
                 <table class="table-dashboard">
@@ -267,7 +269,7 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
                                 <td><?= htmlspecialchars($residentName) ?></td>
                                 <td><?= htmlspecialchars($caseTypeDisplay) ?></td>
                                 <td><span class="badge-status" style="color: <?= htmlspecialchars($statusColor) ?>; background: <?= htmlspecialchars($statusColor) ?>18;"><?= htmlspecialchars($status) ?></span></td>
-                                <td><?= htmlspecialchars($dateDisplay) ?></td>
+                                <td class="hm-date-cell"><?php if ($dateTs !== false): ?><strong><?= date('M d, Y', $dateTs) ?></strong><small><?= date('h:i A', $dateTs) ?></small><?php else: ?><?= htmlspecialchars($dateDisplay) ?><?php endif; ?></td>
                                 <td>
                                     <button
                                         type="button"
@@ -379,6 +381,58 @@ if ($idColumn === null || $displayIdColumn === null || $residentColumn === null)
 .home-modal-item strong{font-size:13px;color:#111827;line-height:1.4;}
 .home-modal-item-full{grid-column:1 / -1;}
 @media (max-width: 700px){.home-modal-grid{grid-template-columns:1fr;}}
+
+/* ── Home refresh (UI only) ── */
+.gb-ui .hm-banner{position:relative;overflow:hidden;border-radius:16px;padding:22px 26px;margin-bottom:20px;background:radial-gradient(circle at 0% 0%,rgba(255,255,255,.10),transparent 45%),linear-gradient(135deg,#1a3a6b 0%,#0e2242 70%,#0b1a33 100%);box-shadow:0 14px 34px rgba(14,34,66,.22);}
+.gb-ui .hm-banner::after{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(201,162,39,.18),transparent 65%);pointer-events:none;}
+.hm-banner-main{display:flex;align-items:center;gap:16px;position:relative;z-index:1;}
+.hm-seal{width:56px;height:56px;border-radius:50%;background:#fff;padding:3px;flex-shrink:0;box-shadow:0 0 0 3px rgba(255,255,255,.16),0 8px 18px rgba(0,0,0,.25);}
+.hm-seal img{width:100%;height:100%;object-fit:contain;border-radius:50%;}
+.gb-ui .hm-banner h5{font-size:22px;font-weight:700;margin-bottom:3px;}
+.gb-ui .hm-banner p{font-size:14px;color:rgba(255,255,255,.78);}
+.gb-ui .hm-date{position:relative;z-index:1;display:flex;align-items:center;gap:10px;padding:9px 14px;border-radius:12px;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.14);color:rgba(255,255,255,.75);font-size:12.5px;text-align:left;}
+.hm-date i{font-size:20px;color:#e9c766;}
+.hm-date strong{display:block;color:#fff;font-size:14px;font-weight:700;}
+
+.gb-ui .gb-sum-card{border-radius:14px;border-right-color:#e1e7f0;border-bottom-color:#e1e7f0;border-left-color:#e1e7f0;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.045);}
+.gb-ui .gb-sum-label{color:#4f5f75;}
+.gb-ui .gb-sum-sub{color:#6f7f96;}
+
+.hm-widgets{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:20px;}
+.hm-widget{--tone:#24508f;--tone-bg:#eef3fb;border-left:4px solid var(--tone)!important;padding:18px 22px!important;}
+.hm-widget.is-amber{--tone:#d97706;--tone-bg:#fff7ed;}
+.hm-widget.is-red{--tone:#dc2626;--tone-bg:#fef2f2;}
+.hm-widget-row{display:flex;align-items:center;gap:14px;}
+.hm-widget-icon{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;flex-shrink:0;background:var(--tone-bg);color:var(--tone);font-size:20px;}
+.hm-widget-text{flex:1;min-width:0;}
+.hm-widget-text strong,.hm-widget-title strong{font-size:15px;color:#14213a;}
+.hm-widget-text p{margin:2px 0 6px;font-size:13px;color:#4f5f75;line-height:1.45;}
+.hm-due{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;background:var(--tone-bg);color:var(--tone);font-size:12.5px;font-weight:700;}
+.hm-widget-btn{display:inline-flex;align-items:center;gap:5px;padding:9px 14px;border-radius:10px;border:1.5px solid var(--tone);color:var(--tone);background:#fff;font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap;transition:background .15s,color .15s;}
+.hm-widget-btn:hover{background:var(--tone);color:#fff;}
+.hm-widget-title{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+.hm-widget-title .hm-widget-icon{width:36px;height:36px;font-size:18px;}
+.hm-deadlines{display:flex;flex-direction:column;gap:6px;}
+.hm-deadline{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;background:#f8fafc;border:1px solid #edf1f7;text-decoration:none;color:#334155;font-size:13.5px;transition:border-color .15s,background .15s;}
+.hm-deadline:hover{border-color:#93c5fd;background:#f6f9ff;}
+.hm-deadline-case{font-weight:700;color:#1a3a6b;font-family:monospace;font-size:13px;}
+.hm-deadline-text{flex:1;}
+.hm-deadline-left{padding:3px 9px;border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap;}
+.hm-deadline-left.is-amber{background:#fff7ed;color:#b45309;}
+.hm-deadline-left.is-red{background:#fef2f2;color:#dc2626;}
+
+.hm-table-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+.hm-all-link{display:inline-flex;align-items:center;gap:5px;padding:8px 13px;border-radius:10px;background:#eef3fb;color:#1a3a6b;font-size:13px;font-weight:700;text-decoration:none;white-space:nowrap;transition:background .15s;}
+.hm-all-link:hover{background:#dfe8f7;}
+.hm-date-cell strong{display:block;font-weight:600;white-space:nowrap;}
+.hm-date-cell small{display:block;font-size:12.5px;color:#6f7f96;}
+
+.gb-ui .home-modal-card{border-radius:16px;}
+.gb-ui .home-modal-head{padding:16px 20px;}
+.gb-ui .home-modal-title{font-family:'Source Serif 4',serif;font-size:20px;color:#0b1a33;}
+.gb-ui .home-modal-body{padding:16px 20px 20px;}
+.gb-ui .home-modal-item strong{font-size:14px;}
+@media (max-width:760px){.gb-ui .hm-banner{flex-direction:column;align-items:flex-start;gap:14px;}.hm-table-head{flex-direction:column;}}
 </style>
 
 </body>

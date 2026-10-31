@@ -57,422 +57,248 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GabayBatas — Login</title>
-<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet">
+<title>GabayBatas — Sign In</title>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link href="https://unicons.iconscout.com/release/v4.0.8/css/line.css" rel="stylesheet">
 <style>
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-
+:root {
+    --navy-900: #0b1a33;
+    --navy-800: #0e2242;
+    --navy-700: #1a3a6b;
+    --navy-600: #24508f;
+    --gold: #c9a227;
+    --accent: #c2560c;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #dbe3ef;
+    --bg: #eef2f8;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-    min-height: 100vh;
-    font-family: 'Source Sans 3', sans-serif;
-    color: #1a2535;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    background: #050d1a;
-    position: relative;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 32px 16px 20px; font-family: 'Source Sans 3', sans-serif; color: var(--ink); background: var(--bg);
+    position: relative; overflow-x: hidden;
 }
+/* Soft background shapes, like the sample, in the site's navy and blue */
+body::before, body::after {
+    content: ''; position: fixed; z-index: 0; border-radius: 46% 54% 60% 40% / 52% 40% 60% 48%; filter: blur(2px);
+}
+body::before { width: 620px; height: 620px; top: -220px; left: -160px; background: radial-gradient(circle at 40% 40%, #c7d7f2, #dbe6f7 60%, transparent 70%); }
+body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; background: radial-gradient(circle at 60% 50%, #d6e2f5, #e4ecf8 60%, transparent 70%); }
+.flag-bar { position: fixed; top: 0; left: 0; right: 0; height: 4px; z-index: 2; background: linear-gradient(90deg, var(--navy-700) 0 33%, #b91c1c 33% 66%, var(--gold) 66%); }
 
-/* ── CANVAS PARTICLES ── */
-#particles { position:fixed;inset:0;z-index:0;pointer-events:none; }
+.shell {
+    position: relative; z-index: 1; width: 100%; max-width: 1040px; min-height: 580px; display: grid; grid-template-columns: 1.08fr 1fr;
+    background: #fff; border-radius: 22px; overflow: hidden; box-shadow: 0 30px 80px rgba(14, 34, 66, .18), 0 2px 6px rgba(14, 34, 66, .06);
+    animation: rise .5s ease-out both;
+}
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
-/* ── AURORA LAYERS ── */
-.aurora {
-    position: fixed; inset: 0; z-index: 0; pointer-events: none;
-    overflow: hidden;
+/* ── Left: the barangay ── */
+.brand {
+    position: relative; display: flex; flex-direction: column; padding: 34px 38px 30px; color: #fff;
+    background: radial-gradient(circle at 15% 0%, rgba(255,255,255,.10), transparent 40%), linear-gradient(160deg, var(--navy-700) 0%, var(--navy-800) 55%, var(--navy-900) 100%);
 }
-.aurora-band {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(80px);
-    opacity: .55;
-    mix-blend-mode: screen;
-    will-change: transform;
-}
-.aurora-band:nth-child(1) {
-    width: 900px; height: 500px;
-    top: -200px; left: -200px;
-    background: radial-gradient(ellipse, #0a2d6e 0%, transparent 70%);
-    animation: aurora1 18s ease-in-out infinite alternate;
-}
-.aurora-band:nth-child(2) {
-    width: 700px; height: 600px;
-    top: -100px; right: -150px;
-    background: radial-gradient(ellipse, #0f4a8a 0%, transparent 70%);
-    animation: aurora2 22s ease-in-out infinite alternate;
-    opacity: .4;
-}
-.aurora-band:nth-child(3) {
-    width: 800px; height: 400px;
-    bottom: -150px; left: 10%;
-    background: radial-gradient(ellipse, #1a3a6b 0%, transparent 70%);
-    animation: aurora3 16s ease-in-out infinite alternate;
-    opacity: .5;
-}
-.aurora-band:nth-child(4) {
-    width: 500px; height: 500px;
-    bottom: -80px; right: -100px;
-    background: radial-gradient(ellipse, #b8800a 0%, transparent 70%);
-    animation: aurora4 20s ease-in-out infinite alternate;
-    opacity: .18;
-}
+.seals { position: relative; z-index: 1; display: flex; align-items: center; gap: 14px; }
+.seal { width: 64px; height: 64px; border-radius: 50%; background: #fff; display: grid; place-items: center; padding: 4px; box-shadow: 0 0 0 3px rgba(255,255,255,.18), 0 8px 20px rgba(0,0,0,.25); }
+.seal img { width: 100%; height: 100%; object-fit: contain; border-radius: 50%; }
+.lgu { line-height: 1.35; }
+.lgu small { display: block; font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: rgba(255,255,255,.65); }
+.lgu strong { display: block; font-family: 'Source Serif 4', serif; font-size: 21px; font-weight: 700; letter-spacing: .3px; }
+.lgu span { display: block; font-size: 12.5px; color: rgba(255,255,255,.75); }
 
-@keyframes aurora1 { from{transform:translate(0,0) scale(1)} to{transform:translate(80px,40px) scale(1.15)} }
-@keyframes aurora2 { from{transform:translate(0,0) rotate(0deg)} to{transform:translate(-60px,30px) rotate(15deg)} }
-@keyframes aurora3 { from{transform:translate(0,0) scale(1)} to{transform:translate(40px,-60px) scale(1.1)} }
-@keyframes aurora4 { from{transform:translate(0,0)} to{transform:translate(-50px,-40px) scale(1.2)} }
+.stage {
+    position: relative; z-index: 1; flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; margin: 22px 0 14px;
+}
+.stage-card {
+    width: 100%; max-width: 380px; aspect-ratio: 4 / 3; border-radius: 18px; background: #fff; display: grid; place-items: center;
+    box-shadow: 0 18px 40px rgba(0,0,0,.28); position: relative; overflow: hidden;
+}
+.stage-card::before { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 34%; background: linear-gradient(180deg, transparent, #f1f5fb); }
+#justiceAnim { position: relative; width: 92%; height: 92%; }
+.stage-fallback { font-size: 72px; color: var(--navy-700); }
+.tagline { margin-top: 20px; text-align: center; max-width: 380px; }
+.tagline h2 { font-family: 'Source Serif 4', serif; font-size: 19px; font-weight: 600; }
+.tagline p { margin-top: 5px; font-size: 13px; color: rgba(255,255,255,.72); line-height: 1.55; }
+.brand-foot { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: rgba(255,255,255,.6); }
+.brand-foot i { color: var(--gold); font-size: 15px; }
 
-/* ── GRID OVERLAY ── */
-.grid-overlay {
-    position: fixed; inset: 0; z-index: 1; pointer-events: none;
-    background-image:
-        linear-gradient(rgba(100,160,255,.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(100,160,255,.06) 1px, transparent 1px);
-    background-size: 48px 48px;
-    mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%);
-    -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black 30%, transparent 100%);
-}
+/* ── Right: sign in ── */
+.panel { display: flex; flex-direction: column; justify-content: center; padding: 44px 48px 30px; }
+.app-mark { display: inline-flex; align-items: center; gap: 9px; margin-bottom: 26px; }
+.app-mark i { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--navy-700); color: #fff; font-size: 18px; }
+.app-mark b { font-family: 'Source Serif 4', serif; font-size: 18px; color: var(--navy-800); }
+.app-mark small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .3px; }
+.panel h1 { font-family: 'Source Serif 4', serif; font-size: 30px; font-weight: 700; color: var(--ink); line-height: 1.15; }
+.panel .lead { margin: 8px 0 24px; font-size: 13.5px; color: var(--muted); line-height: 1.55; }
 
-/* ── SCAN LINE ── */
-.scanline {
-    position: fixed; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(100,180,255,.25), transparent);
-    z-index: 2; pointer-events: none;
-    animation: scan 8s linear infinite;
-}
-@keyframes scan { 0%{top:-2px} 100%{top:100vh} }
+.error-box { display: flex; align-items: center; gap: 9px; padding: 11px 13px; margin-bottom: 16px; border-radius: 10px; background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; font-size: 13px; font-weight: 600; }
+.error-box i { font-size: 17px; }
 
-/* ── FLOATING CARDS ── */
-.float-cards {
-    position: fixed; inset: 0; z-index: 1; pointer-events: none;
-}
-.fc {
-    position: absolute;
-    background: rgba(255,255,255,.04);
-    border: 1px solid rgba(255,255,255,.07);
-    border-radius: 16px;
-    backdrop-filter: blur(4px);
-    animation: fcFloat linear infinite;
-}
-.fc:nth-child(1){width:90px;height:90px;top:12%;left:6%;animation-duration:14s;animation-delay:0s;}
-.fc:nth-child(2){width:60px;height:60px;top:70%;left:8%;animation-duration:11s;animation-delay:2s;}
-.fc:nth-child(3){width:110px;height:60px;top:30%;right:7%;animation-duration:16s;animation-delay:1s;}
-.fc:nth-child(4){width:70px;height:70px;top:75%;right:10%;animation-duration:13s;animation-delay:3s;}
-.fc:nth-child(5){width:50px;height:80px;top:50%;left:20%;animation-duration:18s;animation-delay:0.5s;}
-@keyframes fcFloat {
-    0%{transform:translateY(0) rotate(0deg);opacity:.5}
-    50%{transform:translateY(-22px) rotate(4deg);opacity:.9}
-    100%{transform:translateY(0) rotate(0deg);opacity:.5}
-}
-
-/* ── ACCENT LINE TOP ── */
-.accent-bar {
-    position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 10;
-    background: linear-gradient(90deg, #1a3a6b, #2a6dd9, #c9a83c, #2a6dd9, #1a3a6b);
-    background-size: 300% 100%;
-    animation: barShift 6s linear infinite;
-}
-@keyframes barShift { 0%{background-position:0% 50%} 100%{background-position:300% 50%} }
-
-/* ── CONTENT WRAP ── */
-.content-wrap {
-    position: relative; z-index: 5;
-    display: flex; flex-direction: column; align-items: center;
-    padding: 20px;
-}
-
-/* ── CARD ── */
-.card {
-    width: 440px; max-width: 96vw;
-    background: rgba(255,255,255,.97);
-    border-radius: 20px;
-    border: 1px solid rgba(255,255,255,.3);
-    box-shadow:
-        0 32px 80px rgba(0,0,0,.5),
-        0 0 0 1px rgba(255,255,255,.06),
-        inset 0 1px 0 rgba(255,255,255,.8);
-    animation: cardIn .6s cubic-bezier(.22,1,.36,1) both;
-    overflow: hidden;
-}
-@keyframes cardIn {
-    from{opacity:0;transform:translateY(30px) scale(.97)}
-    to{opacity:1;transform:translateY(0) scale(1)}
-}
-
-/* Card top accent strip */
-.card-stripe {
-    height: 4px;
-    background: linear-gradient(90deg, #1a3a6b 0%, #2a6dd9 50%, #c9a83c 100%);
-}
-
-.card-header {
-    padding: 28px 32px 20px;
-    display: flex; align-items: center; gap: 16px;
-}
-.shield-icon {
-    width: 54px; height: 54px; flex-shrink: 0;
-    background: linear-gradient(135deg, #1a3a6b, #2a5298);
-    border-radius: 14px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 24px; color: #fff;
-    box-shadow: 0 8px 20px rgba(26,58,107,.35);
-}
-.brand-info h1 {
-    font-family: 'Source Serif 4', serif;
-    font-size: 21px; font-weight: 600;
-    color: #0f1f38; letter-spacing: .2px;
-}
-.brand-info .subtitle {
-    font-size: 12px; color: #6b7a90; margin-top: 3px; line-height: 1.5;
-}
-
-.card-divider { height: 1px; background: #f0f3f8; margin: 0 32px; }
-
-.card-body { padding: 22px 32px 20px; }
-
-.section-label {
-    font-size: 10.5px; font-weight: 700; letter-spacing: 1.8px;
-    text-transform: uppercase; color: #8a9bb0; margin-bottom: 16px;
-}
-
-.field { margin-bottom: 14px; }
-.field label { display:block; font-size:13px; font-weight:600; color:#2c3e55; margin-bottom:6px; }
-
+.field { margin-bottom: 15px; }
+.field label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: #475569; }
 .input-wrap { position: relative; }
-.input-wrap .field-icon {
-    position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
-    font-size: 17px; color: #a0aec0; pointer-events: none; transition: color .2s;
+.input-wrap > i { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); font-size: 18px; color: #94a3b8; pointer-events: none; transition: color .15s; }
+.input-wrap input {
+    width: 100%; height: 48px; padding: 0 44px; border: 1.5px solid var(--line); border-radius: 12px; background: #f8fafc;
+    font: inherit; font-size: 14.5px; color: var(--ink); outline: none; transition: border-color .15s, box-shadow .15s, background .15s;
 }
-.field input {
-    width: 100%; background: #f7f9fc;
-    border: 1.5px solid #e2e8f0; border-radius: 10px;
-    padding: 11px 12px 11px 40px;
-    font-family: 'Source Sans 3', sans-serif;
-    font-size: 14px; color: #1a2535; outline: none;
-    transition: border-color .2s, box-shadow .2s, background .2s;
-}
-.field input::placeholder { color: #b0bec9; }
-.field input:focus {
-    border-color: #2a5298; background: #fff;
-    box-shadow: 0 0 0 3px rgba(42,82,152,.12);
-}
-.field input:focus + .field-icon { color: #2a5298; }
-
-.toggle-pw {
-    position: absolute; right: 11px; top: 50%; transform: translateY(-50%);
-    background: none; border: none; color: #a0aec0;
-    font-size: 17px; cursor: pointer; padding: 2px;
-    transition: color .2s;
-}
-.toggle-pw:hover { color: #2a5298; }
-
-.error-box {
-    margin-bottom: 14px; padding: 10px 14px;
-    border: 1px solid #fca5a5; background: #fff5f5;
-    color: #991b1b; border-radius: 10px; font-size: 13px;
-    display: flex; align-items: center; gap: 8px;
-}
+.input-wrap input:focus { border-color: var(--navy-600); background: #fff; box-shadow: 0 0 0 4px rgba(36, 80, 143, .12); }
+.input-wrap input:focus + i, .input-wrap:focus-within > i { color: var(--navy-600); }
+.toggle-pw { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 34px; height: 34px; border: 0; border-radius: 8px; background: transparent; color: #94a3b8; font-size: 18px; cursor: pointer; }
+.toggle-pw:hover { background: #eef2f8; color: var(--navy-700); }
 
 .btn-login {
-    width: 100%; padding: 12px;
-    background: linear-gradient(135deg, #1a3a6b 0%, #2a5298 100%);
-    border: none; border-radius: 11px; color: #fff;
-    font-family: 'Source Sans 3', sans-serif;
-    font-size: 14px; font-weight: 700; letter-spacing: .4px;
-    cursor: pointer; margin-top: 4px;
-    display: flex; align-items: center; justify-content: center; gap: 8px;
-    box-shadow: 0 6px 20px rgba(26,58,107,.35);
-    transition: all .2s;
+    width: 100%; height: 50px; margin-top: 8px; border: 0; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    background: linear-gradient(135deg, var(--navy-600), var(--navy-800)); color: #fff; font: inherit; font-size: 15px; font-weight: 700; letter-spacing: .3px;
+    cursor: pointer; box-shadow: 0 10px 24px rgba(26, 58, 107, .28); transition: transform .15s, box-shadow .15s, filter .15s;
 }
-.btn-login:hover {
-    background: linear-gradient(135deg, #153060 0%, #1e407a 100%);
-    box-shadow: 0 10px 28px rgba(26,58,107,.45);
-    transform: translateY(-1px);
-}
-.btn-login:active { transform: translateY(0); }
+.btn-login:hover { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(26, 58, 107, .34); filter: brightness(1.06); }
+.btn-login:disabled { cursor: progress; filter: saturate(.7); transform: none; }
+.btn-login .spin { display: none; width: 16px; height: 16px; border-radius: 50%; border: 2px solid rgba(255,255,255,.4); border-top-color: #fff; animation: spin .8s linear infinite; }
+.btn-login.is-busy .spin { display: inline-block; }
+.btn-login.is-busy i { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.card-footer {
-    padding: 14px 32px 18px;
-    background: #f7f9fc;
-    border-top: 1px solid #edf2f7;
-    display: flex; align-items: flex-start; gap: 10px;
+.note { display: flex; gap: 9px; margin-top: 18px; padding: 11px 13px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 12.5px; color: #475569; line-height: 1.5; }
+.note i { color: var(--navy-600); font-size: 16px; margin-top: 1px; }
+.divider { display: flex; align-items: center; gap: 12px; margin: 20px 0 14px; font-size: 11.5px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+.track-link {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; text-decoration: none; color: var(--ink);
+    transition: border-color .15s, background .15s;
 }
-.card-footer i { color: #2a5298; font-size: 15px; flex-shrink: 0; margin-top: 1px; }
-.card-footer p { font-size: 12px; color: #718096; line-height: 1.6; }
-.card-footer p strong { color: #2d3748; }
+.track-link:hover { border-color: #93c5fd; background: #f8fbff; }
+.track-link .ti { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #fff7ed; color: var(--accent); font-size: 18px; }
+.track-link strong { display: block; font-size: 13.5px; }
+.track-link small { display: block; font-size: 12px; color: var(--muted); }
+.track-link .go { margin-left: auto; color: #94a3b8; font-size: 20px; }
 
-.page-footer {
-    margin-top: 16px; font-size: 12px;
-    color: rgba(255,255,255,.3); text-align: center; letter-spacing: .3px;
-}
+.page-foot { position: relative; z-index: 1; margin-top: 18px; font-size: 12px; color: #7b8aa3; text-align: center; }
 
-@media(max-width:500px){
-    .card-header,.card-body,.card-footer{padding-left:22px;padding-right:22px;}
-    .card-divider{margin:0 22px;}
+@media (max-width: 880px) {
+    .shell { grid-template-columns: 1fr; max-width: 480px; min-height: 0; }
+    .brand { padding: 24px 24px 22px; }
+    .stage, .brand-foot { display: none; }
+    .panel { padding: 30px 26px 26px; }
 }
+@media (prefers-reduced-motion: reduce) { .shell { animation: none; } }
 </style>
 </head>
 <body>
+<div class="flag-bar"></div>
 
-<div class="accent-bar"></div>
-<canvas id="particles"></canvas>
-<div class="aurora">
-    <div class="aurora-band"></div>
-    <div class="aurora-band"></div>
-    <div class="aurora-band"></div>
-    <div class="aurora-band"></div>
-</div>
-<div class="grid-overlay"></div>
-<div class="scanline"></div>
-<div class="float-cards">
-    <div class="fc"></div><div class="fc"></div>
-    <div class="fc"></div><div class="fc"></div><div class="fc"></div>
-</div>
-
-<div class="content-wrap">
-    <div class="card">
-        <div class="card-stripe"></div>
-
-        <div class="card-header">
-            <div class="shield-icon"><i class="uil uil-shield-check"></i></div>
-            <div class="brand-info">
-                <h1>GabayBatas</h1>
-                <div class="subtitle">Legal Information &amp; Referral System<br>Catbalogan City, Samar</div>
+<main class="shell">
+    <section class="brand" aria-label="Barangay Muñoz">
+        <div class="seals">
+            <span class="seal"><img src="images/seal_city_catbalogan.png" alt="Seal of the City of Catbalogan"></span>
+            <span class="seal"><img src="images/seal_barangay_munoz.png" alt="Seal of Barangay Muñoz"></span>
+            <div class="lgu">
+                <small>Republic of the Philippines</small>
+                <strong>Barangay Muñoz</strong>
+                <span>City of Catbalogan, Samar</span>
             </div>
         </div>
 
-        <div class="card-divider"></div>
-
-        <div class="card-body">
-            <div class="section-label">System Login</div>
-
-            <form method="POST" action="login.php" autocomplete="off">
-                <?php if ($error !== ''): ?>
-                <div class="error-box">
-                    <i class="uil uil-exclamation-triangle"></i>
-                    <?= htmlspecialchars($error) ?>
-                </div>
-                <?php endif; ?>
-
-                <div class="field">
-                    <label for="username">Username</label>
-                    <div class="input-wrap">
-                        <input type="text" id="username" name="username"
-                            placeholder="Enter your username" required
-                            value="<?= htmlspecialchars($_POST['username'] ?? '') ?>">
-                        <i class="uil uil-user field-icon"></i>
-                    </div>
-                </div>
-
-                <div class="field">
-                    <label for="password">Password</label>
-                    <div class="input-wrap">
-                        <input type="password" id="password" name="password"
-                            placeholder="Enter your password" required>
-                        <i class="uil uil-lock field-icon"></i>
-                        <button type="button" class="toggle-pw" onclick="togglePw()" tabindex="-1">
-                            <i class="uil uil-eye-slash" id="pwIcon"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn-login">
-                    <i class="uil uil-sign-in-alt"></i> Login to System
-                </button>
-            </form>
+        <div class="stage">
+            <div class="stage-card">
+                <div id="justiceAnim" aria-hidden="true"><i class="uil uil-balance-scale stage-fallback"></i></div>
+            </div>
+            <div class="tagline">
+                <h2>Katarungang Pambarangay, made accessible</h2>
+                <p>File, track and settle community disputes the lawful way, through the Lupong Tagapamayapa of Barangay Muñoz.</p>
+            </div>
         </div>
 
-        <div class="card-footer">
-            <i class="uil uil-info-circle"></i>
-            <p>Use <strong>admin</strong> credentials for Administrator access. Barangay officials must use their assigned barangay account.</p>
+        <div class="brand-foot"><i class="uil uil-shield-check"></i> Official case management portal of the Office of the Punong Barangay</div>
+    </section>
+
+    <section class="panel">
+        <div class="app-mark">
+            <i class="uil uil-shield-check"></i>
+            <span><b>GabayBatas</b><small>Legal Information &amp; Referral System</small></span>
         </div>
 
-        <div style="padding:14px 28px 20px;text-align:center;border-top:1px solid rgba(255,255,255,0.08);">
-            <a href="track.php" style="color:#93c5fd;font-size:13px;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:7px;padding:9px 18px;border-radius:8px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);transition:all 0.2s;">
-                <i class="uil uil-search-alt" style="font-size:16px;"></i> Are you a resident? Track your case status &rarr;
-            </a>
-        </div>
-    </div>
+        <h1>Welcome back</h1>
+        <p class="lead">Sign in with your official account to manage barangay cases and records.</p>
 
-    <div class="page-footer">&copy; <?= date('Y') ?> GabayBatas &mdash; Catbalogan City Government</div>
-</div>
+        <form method="POST" action="login.php" autocomplete="off" id="loginForm">
+            <?php if ($error !== ''): ?>
+            <div class="error-box" role="alert"><i class="uil uil-exclamation-triangle"></i><?= htmlspecialchars($error) ?></div>
+            <?php endif; ?>
 
+            <div class="field">
+                <label for="username">Username</label>
+                <div class="input-wrap">
+                    <input type="text" id="username" name="username" placeholder="Enter your username" required autofocus
+                        value="<?= htmlspecialchars($_POST['username'] ?? '') ?>">
+                    <i class="uil uil-user"></i>
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="password">Password</label>
+                <div class="input-wrap">
+                    <input type="password" id="password" name="password" placeholder="Enter your password" required>
+                    <i class="uil uil-lock"></i>
+                    <button type="button" class="toggle-pw" id="togglePw" aria-label="Show password"><i class="uil uil-eye-slash" id="pwIcon"></i></button>
+                </div>
+            </div>
+
+            <button type="submit" class="btn-login" id="loginBtn"><span class="spin"></span><i class="uil uil-sign-in-alt"></i> <span class="label">Sign in</span></button>
+        </form>
+
+        <div class="note"><i class="uil uil-info-circle"></i><span>For barangay officials and system administrators only. Residents use the GabayBatas mobile app.</span></div>
+
+        <div class="divider">Residents</div>
+        <a href="track.php" class="track-link">
+            <span class="ti"><i class="uil uil-search-alt"></i></span>
+            <span><strong>Track your case status</strong><small>Enter your case number to see its progress</small></span>
+            <i class="uil uil-angle-right go"></i>
+        </a>
+    </section>
+</main>
+
+<div class="page-foot">&copy; <?= date('Y') ?> GabayBatas &middot; Barangay Muñoz, City of Catbalogan, Samar</div>
+
+<script src="assets/vendor/lottie/lottie_light.min.js"></script>
 <script>
-// ── PASSWORD TOGGLE
-function togglePw() {
-    const f = document.getElementById('password');
-    const i = document.getElementById('pwIcon');
-    f.type = f.type === 'password' ? 'text' : 'password';
-    i.className = f.type === 'password' ? 'uil uil-eye-slash' : 'uil uil-eye';
-}
+// Show or hide the password
+document.getElementById('togglePw').addEventListener('click', function () {
+    const field = document.getElementById('password');
+    const show = field.type === 'password';
+    field.type = show ? 'text' : 'password';
+    document.getElementById('pwIcon').className = show ? 'uil uil-eye' : 'uil uil-eye-slash';
+    this.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+});
 
-// ── PARTICLE SYSTEM
-const canvas = document.getElementById('particles');
-const ctx = canvas.getContext('2d');
-let W, H, particles = [];
+// Busy state while signing in
+document.getElementById('loginForm').addEventListener('submit', function () {
+    const btn = document.getElementById('loginBtn');
+    btn.classList.add('is-busy');
+    btn.querySelector('.label').textContent = 'Signing in…';
+    setTimeout(function () { btn.disabled = true; }, 0);
+});
+window.addEventListener('pageshow', function (e) {
+    if (!e.persisted) return;
+    const btn = document.getElementById('loginBtn');
+    btn.classList.remove('is-busy');
+    btn.disabled = false;
+    btn.querySelector('.label').textContent = 'Sign in';
+});
 
-function resize() {
-    W = canvas.width  = window.innerWidth;
-    H = canvas.height = window.innerHeight;
-}
-resize();
-window.addEventListener('resize', resize);
-
-class Particle {
-    constructor() { this.reset(); }
-    reset() {
-        this.x  = Math.random() * W;
-        this.y  = Math.random() * H;
-        this.vx = (Math.random() - .5) * .4;
-        this.vy = (Math.random() - .5) * .4;
-        this.r  = Math.random() * 1.5 + .5;
-        this.alpha = Math.random() * .5 + .15;
-        this.life  = 0;
-        this.maxLife = 200 + Math.random() * 300;
-    }
-    update() {
-        this.x += this.vx; this.y += this.vy; this.life++;
-        if (this.life > this.maxLife || this.x < 0 || this.x > W || this.y < 0 || this.y > H) this.reset();
-    }
-    draw() {
-        const fade = Math.sin((this.life / this.maxLife) * Math.PI);
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(140,190,255,${this.alpha * fade})`;
-        ctx.fill();
-    }
-}
-
-// Connections between nearby particles
-function drawConnections() {
-    for (let i = 0; i < particles.length; i++) {
-        for (let j = i + 1; j < particles.length; j++) {
-            const dx = particles[i].x - particles[j].x;
-            const dy = particles[i].y - particles[j].y;
-            const d  = Math.sqrt(dx*dx + dy*dy);
-            if (d < 120) {
-                ctx.beginPath();
-                ctx.moveTo(particles[i].x, particles[i].y);
-                ctx.lineTo(particles[j].x, particles[j].y);
-                ctx.strokeStyle = `rgba(100,170,255,${.12 * (1 - d/120)})`;
-                ctx.lineWidth = .8;
-                ctx.stroke();
-            }
-        }
-    }
-}
-
-for (let i = 0; i < 90; i++) particles.push(new Particle());
-
-function animate() {
-    ctx.clearRect(0, 0, W, H);
-    drawConnections();
-    particles.forEach(p => { p.update(); p.draw(); });
-    requestAnimationFrame(animate);
-}
-animate();
+// Justice illustration (assets/lottie/justice-scale.json, credits in assets/lottie/CREDITS.txt)
+(function () {
+    const box = document.getElementById('justiceAnim');
+    if (!window.lottie || !box) return;
+    const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const anim = lottie.loadAnimation({container: box, renderer: 'svg', loop: !still, autoplay: !still, path: 'assets/lottie/justice-scale.json'});
+    anim.addEventListener('DOMLoaded', function () {
+        const fallback = box.querySelector('.stage-fallback');
+        if (fallback) fallback.remove();
+        if (still) anim.goToAndStop(Math.floor(anim.totalFrames * 0.6), true);
+    });
+})();
 </script>
 </body>
 </html>

@@ -627,6 +627,7 @@
         }
     </style>
     <?php $gbBellEndpoint = 'recent_activity.php'; include __DIR__ . '/activity_bell.php'; ?>
+    <?php require_once __DIR__ . '/lottie.php'; gabaybatas_lottie_loader(); ?>
     <script>
     window.AdminToast = window.AdminToast || (function () {
         let host = null;
@@ -653,7 +654,10 @@
             const toast = document.createElement('div');
             const t = type || 'info';
             toast.className = 'admin-toast ' + t;
-            toast.innerHTML = '<div class="admin-toast-icon"><i class="uil ' + iconFor(t) + '"></i></div>' +
+            const icon = t === 'success'
+                ? '<div class="gb-lottie" data-lottie="../assets/lottie/success.json" data-lottie-once style="width:34px;height:34px"><i class="uil uil-check-circle gb-lottie-fallback"></i></div>'
+                : '<i class="uil ' + iconFor(t) + '"></i>';
+            toast.innerHTML = '<div class="admin-toast-icon">' + icon + '</div>' +
                 '<div class="admin-toast-body"><div class="admin-toast-title"></div><div class="admin-toast-message"></div></div>' +
                 '<button type="button" class="admin-toast-close" aria-label="Close">&times;</button>';
 
@@ -661,6 +665,7 @@
             toast.querySelector('.admin-toast-message').textContent = message || '';
 
             root.appendChild(toast);
+            if (window.gbLottieScan) window.gbLottieScan(toast);
             requestAnimationFrame(function () { toast.classList.add('show'); });
 
             const life = typeof timeout === 'number' ? timeout : 3600;

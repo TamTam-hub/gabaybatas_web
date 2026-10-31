@@ -348,6 +348,7 @@ $err = static fn(string $key): string => isset($errors[$key])
             : window.confirm('Save this case?');
         if (!ok) return;
         confirmed = true;
+        if (window.gbLoading) window.gbLoading.show('Saving the new case…', 'Uploading the details and photos.');
         form.submit();
     });
 })();
@@ -376,4 +377,9 @@ $err = static fn(string $key): string => isset($errors[$key])
 .acs-video-card strong{font-size:13px;color:#1e293b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .acs-video-card span{font-size:11.5px;color:#64748b;}
 .acs-video-remove{border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:8px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;}
+/* UI refresh: navy upload tiles */
+.gb-ui .acs-add-tile,.gb-ui .acs-add-video{border-color:#a9bfe0;background:#f3f7fd;color:#1a3a6b;font-size:13px;}
+.gb-ui .acs-add-tile:hover,.gb-ui .acs-add-video:hover{background:#e6eef9;border-color:#1a3a6b;}
+.gb-ui .acs-video-card i{color:#1a3a6b;}
+.gb-ui .acs-thumb,.gb-ui .acs-add-tile{border-radius:14px;}
 </style>

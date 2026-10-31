@@ -494,6 +494,8 @@ if (!function_exists('kp_serve_docx_download')) {
             exit;
         }
 
+        require_once __DIR__ . '/download_signal.php';
+        gabaybatas_download_ready();
         header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
         header('Content-Length: ' . filesize($filePath));

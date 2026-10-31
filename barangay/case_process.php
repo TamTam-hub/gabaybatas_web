@@ -390,7 +390,7 @@ $actionError = [
 
                 <?php if (!$finderCases): ?>
                     <div class="kp-finder-empty">
-                        <i class="uil uil-folder-open"></i>
+                        <?= gabaybatas_lottie($finderQuery !== '' ? 'search-file' : 'empty-box', 120) ?>
                         <p><?= $finderQuery !== '' ? 'No case matches "' . htmlspecialchars($finderQuery) . '".' : 'No cases to show.' ?></p>
                     </div>
                 <?php else: ?>
@@ -537,10 +537,10 @@ $actionError = [
                 <div class="kp-panel-card">
                     <div class="kp-panel-title">Quick Actions</div>
                     <div class="kp-quick-actions">
-                        <a href="view_case.php?id=<?= urlencode($caseIdParam) ?>" class="kp-action-btn kp-action-view">
+                        <a href="view_case.php?id=<?= urlencode($caseIdParam) ?>&amp;from=process" class="kp-action-btn kp-action-view">
                             <i class="uil uil-eye"></i> View Full Details
                         </a>
-                        <a href="update_case.php?id=<?= urlencode($caseIdParam) ?>" class="kp-action-btn kp-action-edit">
+                        <a href="update_case.php?id=<?= urlencode($caseIdParam) ?>&amp;from=process" class="kp-action-btn kp-action-edit">
                             <i class="uil uil-edit"></i> Edit Case Info
                         </a>
                     </div>
@@ -1588,9 +1588,9 @@ $actionError = [
                                     <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                                     <input type="hidden" name="form_number" value="13">
                                     <span><i class="uil uil-file-alt"></i> Form #13 — <?= htmlspecialchars($fi['title']) ?></span>
-                                    <input type="text" name="witness_name" required placeholder="Witness name" style="font-size:12px;padding:4px 6px;">
-                                    <input type="text" name="witness_address" placeholder="Witness address" style="font-size:12px;padding:4px 6px;">
-                                    <button type="submit" name="action" value="generate" class="kp-btn kp-btn-sm">Generate Subpoena</button>
+                                    <input type="text" name="witness_name" required placeholder="Witness name" class="kp-doc-input">
+                                    <input type="text" name="witness_address" placeholder="Witness address" class="kp-doc-input">
+                                    <button type="submit" name="action" value="generate" class="kp-btn kp-btn-sm kp-btn-primary">Generate Subpoena</button>
                                 </form>
                                 <?php
                                         continue;
@@ -2043,6 +2043,117 @@ document.querySelectorAll('form').forEach(form => {
     .kp-hearing-item { flex-direction: column; }
     .kp-hearing-actions { width: 100%; }
 }
+
+/* ═══ UI refresh (barangay theme): navy accents, larger text, all tabs visible ═══ */
+.gb-ui .kp-body { padding: 26px 32px 44px; }
+.gb-ui .kp-back-btn { color: #1a3a6b; background: #eef3fb; border-color: #d6e2f5; border-radius: 10px; padding: 9px 14px; font-size: 13px; }
+.gb-ui .kp-back-btn:hover { background: #dfe8f7; }
+.gb-ui .kp-case-id { font-family: 'Source Serif 4', serif; font-size: 24px; font-weight: 700; color: #0b1a33; letter-spacing: 0; }
+.gb-ui .kp-status-badge { font-size: 12px; padding: 6px 13px; }
+.gb-ui .kp-deadline-alert { border-radius: 12px; font-size: 13.5px; animation: none; }
+
+/* Progress stepper */
+.gb-ui .kp-stage-bar { border-radius: 14px; border-color: #e1e7f0; padding: 18px 22px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045); }
+.gb-ui .kp-stage-item { min-width: 84px; gap: 7px; }
+.gb-ui .kp-stage-dot { width: 36px; height: 36px; font-size: 16px; }
+.gb-ui .kp-stage-item.active .kp-stage-dot { background: linear-gradient(135deg, #24508f, #0e2242); box-shadow: 0 0 0 5px #dfe8f7; }
+.gb-ui .kp-stage-label { font-size: 12px; color: #4f5f75; }
+.gb-ui .kp-stage-item.active .kp-stage-label { color: #0e2242; }
+
+/* Left panel */
+.gb-ui .kp-layout { grid-template-columns: 300px 1fr; gap: 22px; }
+.gb-ui .kp-panel-card, .gb-ui .kp-section-card { border-radius: 14px; border-color: #e1e7f0; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045); }
+.gb-ui .kp-panel-card { padding: 18px; }
+.gb-ui .kp-panel-title { font-size: 12.5px; color: #1a3a6b; letter-spacing: .7px; }
+.gb-ui .kp-info-row { margin-bottom: 10px; }
+.gb-ui .kp-info-label { font-size: 11px; font-weight: 700; color: #6f7f96; }
+.gb-ui .kp-info-value { font-size: 14px; color: #14213a; }
+.gb-ui .kp-info-sm { font-size: 12.5px; color: #4f5f75; line-height: 1.45; }
+.gb-ui .kp-action-btn { font-size: 13px; padding: 10px 12px; border-radius: 10px; }
+.gb-ui .kp-action-view { color: #1a3a6b; background: #eef3fb; } .gb-ui .kp-action-view:hover { background: #dfe8f7; }
+.gb-ui .kp-stat { padding: 10px 8px; border-radius: 10px; background: #f5f7fb; }
+.gb-ui .kp-stat-num { font-size: 20px; color: #0b1a33; }
+.gb-ui .kp-stat-label { font-size: 11px; color: #6f7f96; }
+
+/* Tabs: wrap so every tab is visible; the active one is a navy pill */
+.gb-ui .kp-tabs { flex-wrap: wrap; gap: 4px; padding: 6px; background: #fff; border: 1px solid #e1e7f0; border-radius: 14px; overflow: visible; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+.gb-ui .kp-tab { padding: 9px 14px; font-size: 13px; color: #4f5f75; border-radius: 10px; }
+.gb-ui .kp-tab:hover { color: #0e2242; background: #eef3fb; }
+.gb-ui .kp-tab.active { color: #fff; background: linear-gradient(135deg, #24508f, #0e2242); box-shadow: 0 4px 12px rgba(26,58,107,.25); }
+.gb-ui .kp-tab i { font-size: 15px; }
+
+/* Section cards and text */
+.gb-ui .kp-section-card { padding: 22px 24px; }
+.gb-ui .kp-section-title { font-size: 16px; color: #14213a; }
+.gb-ui .kp-section-desc { font-size: 13.5px; color: #4f5f75; line-height: 1.55; }
+.gb-ui .kp-sub-title { font-size: 14px; color: #1a3a6b; }
+.gb-ui .kp-next-steps { border-left-color: #1a3a6b; }
+.gb-ui .kp-next-body { font-size: 14px; line-height: 1.7; color: #1f2937; }
+.gb-ui .kp-narrative { font-size: 14.5px; line-height: 1.75; color: #1f2937; padding: 14px 16px; border-radius: 12px; }
+.gb-ui .kp-big-badge { font-size: 13.5px; }
+.gb-ui .kp-stage-text { font-size: 13px; color: #4f5f75; }
+
+/* Forms */
+.gb-ui .kp-field { gap: 7px; }
+.gb-ui .kp-field label { font-size: 13px; text-transform: none; letter-spacing: .1px; color: #334155; }
+.gb-ui .kp-field input, .gb-ui .kp-field select, .gb-ui .kp-field textarea { min-height: 42px; padding: 10px 12px; font-size: 14px; background: #fff; border: 1.5px solid #d6deea; border-radius: 10px; color: #14213a; }
+.gb-ui .kp-field input:focus, .gb-ui .kp-field select:focus, .gb-ui .kp-field textarea:focus { border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+
+/* Buttons */
+.gb-ui .kp-btn, .gb-ui .kp-next-action { padding: 10px 16px; font-size: 13.5px; font-weight: 700; border-radius: 10px; }
+.gb-ui .kp-btn-sm { padding: 7px 11px; font-size: 12.5px; }
+.gb-ui .kp-btn-primary, .gb-ui .kp-next-action { background: linear-gradient(135deg, #24508f, #0e2242); color: #fff; box-shadow: 0 6px 14px rgba(26,58,107,.2); }
+.gb-ui .kp-btn-primary:hover, .gb-ui .kp-next-action:hover { background: linear-gradient(135deg, #24508f, #0e2242); filter: brightness(1.08); }
+.gb-ui .kp-btn-outline { color: #1a3a6b; border: 1.5px solid #c9d6ea; } .gb-ui .kp-btn-outline:hover { background: #f6f9ff; border-color: #1a3a6b; }
+.gb-ui .kp-select-sm { font-size: 13px; padding: 7px 10px; border-radius: 9px; border: 1.5px solid #d6deea; }
+
+/* Info boxes, lists, documents, timeline */
+.gb-ui .kp-info-box { border-radius: 12px; font-size: 13.5px; }
+.gb-ui .kp-info-box i { color: #1a3a6b; }
+.gb-ui .kp-info-box p { font-size: 13px; color: #4f5f75; }
+.gb-ui .kp-review-decision { font-size: 14px; }
+.gb-ui .kp-review-date, .gb-ui .kp-stl-date { font-size: 12px; color: #6f7f96; }
+.gb-ui .kp-review-notes, .gb-ui .kp-review-missing { font-size: 13px; }
+.gb-ui .kp-hearing-item, .gb-ui .kp-settlement-card, .gb-ui .kp-doc-item { border-radius: 12px; border-color: #edf1f7; }
+.gb-ui .kp-hearing-date-badge { background: linear-gradient(135deg, #24508f, #0e2242); border-radius: 10px; min-width: 50px; }
+.gb-ui .kp-hb-month { font-size: 10px; }
+.gb-ui .kp-hearing-title { font-size: 14px; }
+.gb-ui .kp-hearing-meta { font-size: 12.5px; }
+.gb-ui .kp-hearing-outcome { font-size: 13px; }
+.gb-ui .kp-pm-avatar, .gb-ui .kp-doc-icon { background: #eef3fb; color: #1a3a6b; }
+.gb-ui .kp-pm-role { font-size: 12px; }
+.gb-ui .kp-stl-terms { font-size: 13.5px; line-height: 1.6; }
+.gb-ui .kp-stl-footer { font-size: 12.5px; }
+.gb-ui .kp-badge-red, .gb-ui .kp-badge-green, .gb-ui .kp-badge-yellow, .gb-ui .kp-doc-status { font-size: 11px; }
+.gb-ui .kp-doc-btn { padding: 14px; border-radius: 12px; border-color: #e1e7f0; background: #fff; }
+.gb-ui .kp-doc-btn:hover { background: #f6f9ff; border-color: #1a3a6b; }
+.gb-ui .kp-doc-btn i { font-size: 20px; color: #1a3a6b; }
+.gb-ui .kp-doc-btn span { font-size: 13.5px; color: #14213a; }
+.gb-ui .kp-doc-btn small { font-size: 12px; color: #6f7f96; line-height: 1.4; }
+.gb-ui .kp-doc-info strong { font-size: 14px; }
+.gb-ui .kp-doc-info span { font-size: 12.5px; }
+.gb-ui .kp-doc-info small { font-size: 12px; }
+.gb-ui .kp-tl-dot { background: #1a3a6b; }
+.gb-ui .kp-tl-title { font-size: 13.5px; }
+.gb-ui .kp-tl-time, .gb-ui .kp-ftl-time { font-size: 12px; color: #6f7f96; }
+.gb-ui .kp-see-all, .gb-ui .kp-back-link, .gb-ui .kp-finder-meta a { color: #1a3a6b; font-size: 13px; }
+.gb-ui .kp-ftl-header strong { font-size: 14px; }
+.gb-ui .kp-ftl-badge { font-size: 11px; }
+.gb-ui .kp-ftl-details { font-size: 13px; }
+.gb-ui .kp-empty-state p { font-size: 14px; }
+.gb-ui .kp-finder-list { border-radius: 12px; }
+.gb-ui .kp-finder-row { padding: 14px 16px; }
+.gb-ui .kp-finder-code { color: #1a3a6b; font-size: 14px; }
+.gb-ui .kp-finder-parties strong { font-size: 14px; }
+.gb-ui .kp-finder-parties span { font-size: 12.5px; }
+.kp-doc-input { width: 100%; font-size: 12px; padding: 4px 6px; }
+.gb-ui .kp-doc-input { min-height: 38px; padding: 8px 10px; font-size: 13.5px; font-family: inherit; color: #14213a; background: #fff; border: 1.5px solid #d6deea; border-radius: 9px; outline: none; box-sizing: border-box; }
+.gb-ui .kp-doc-input:focus { border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+.gb-ui .kp-doc-btn, .gb-ui .kp-tab, .gb-ui .kp-btn, .gb-ui .kp-next-action, .gb-ui .kp-see-all { font-family: inherit; }
+.gb-ui .kp-doc-btn span { display: flex; align-items: center; gap: 6px; }
+.gb-ui .kp-doc-actions a, .gb-ui a.kp-btn { text-decoration: none; }
+@media (max-width: 1200px) { .gb-ui .kp-layout { grid-template-columns: 260px 1fr; } }
+@media (max-width: 1024px) { .gb-ui .kp-layout { grid-template-columns: 1fr; } }
 
 /* ── Print Media Styles ── */
 @media print {

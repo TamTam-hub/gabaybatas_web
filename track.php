@@ -97,61 +97,55 @@ if ($currentStage === 'arbitration') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Track Your KP Case — GabayBatas Barangay Muñoz</title>
-    <link href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://unicons.iconscout.com/release/v4.0.8/css/line.css" rel="stylesheet">
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Source Sans 3', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #f8fafc;
+            background: #eef2f8;
             color: #1e293b;
             min-height: 100vh;
             display: flex;
             flex-direction: column;
         }
+        .flag-bar { height: 4px; background: linear-gradient(90deg, #1a3a6b 0 33%, #b91c1c 33% 66%, #c9a227 66%); }
 
         .track-nav {
-            background: #1e3a8a;
+            background: radial-gradient(circle at 10% 0%, rgba(255,255,255,.10), transparent 40%), linear-gradient(160deg, #1a3a6b 0%, #0e2242 60%, #0b1a33 100%);
             color: #ffffff;
-            padding: 16px 24px;
+            padding: 14px 28px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+            gap: 16px;
+            box-shadow: 0 6px 20px rgba(14, 34, 66, .18);
         }
-        .track-brand {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            text-decoration: none;
-            color: #fff;
-        }
-        .track-logo {
-            width: 38px;
-            height: 38px;
-            background: #2563eb;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-        }
-        .track-brand-text h1 { font-size: 17px; font-weight: 700; line-height: 1.2; }
-        .track-brand-text p { font-size: 11.5px; opacity: 0.8; }
+        .track-brand { display: flex; align-items: center; gap: 12px; text-decoration: none; color: #fff; min-width: 0; }
+        .track-seal { width: 46px; height: 46px; border-radius: 50%; background: #fff; padding: 3px; flex-shrink: 0; box-shadow: 0 0 0 2px rgba(255,255,255,.18); }
+        .track-seal img { width: 100%; height: 100%; object-fit: contain; border-radius: 50%; }
+        .track-brand-text { margin-left: 4px; line-height: 1.3; }
+        .track-brand-text small { display: block; font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase; color: rgba(255,255,255,.65); }
+        .track-brand-text h1 { font-family: 'Source Serif 4', serif; font-size: 18px; font-weight: 700; }
+        .track-brand-text p { font-size: 12px; color: rgba(255,255,255,.75); }
+        .track-app { display: inline-flex; align-items: center; gap: 9px; margin-left: auto; padding-right: 6px; color: #fff; }
+        .track-app i { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: rgba(255,255,255,.14); font-size: 17px; }
+        .track-app b { font-family: 'Source Serif 4', serif; font-size: 16px; }
         .track-login-btn {
-            background: rgba(255,255,255,0.15);
-            color: #fff;
-            padding: 8px 16px;
-            border-radius: 6px;
+            background: #fff;
+            color: #0e2242;
+            padding: 9px 16px;
+            border-radius: 10px;
             text-decoration: none;
             font-size: 13px;
-            font-weight: 600;
+            font-weight: 700;
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            transition: background 0.2s;
+            white-space: nowrap;
+            transition: transform .15s, box-shadow .15s;
         }
-        .track-login-btn:hover { background: rgba(255,255,255,0.25); }
+        .track-login-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(0,0,0,.2); }
 
         .track-container {
             max-width: 860px;
@@ -163,14 +157,15 @@ if ($currentStage === 'arbitration') {
 
         .track-hero {
             background: #ffffff;
-            border-radius: 12px;
-            padding: 28px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+            border-radius: 18px;
+            padding: 32px 28px;
+            box-shadow: 0 18px 50px rgba(14, 34, 66, .10);
             border: 1px solid #e2e8f0;
             text-align: center;
             margin-bottom: 24px;
         }
-        .track-hero h2 { font-size: 22px; color: #0f172a; margin-bottom: 6px; }
+        .track-hero-icon { width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 15px; display: grid; place-items: center; background: #fff7ed; color: #c2560c; font-size: 25px; }
+        .track-hero h2 { font-family: 'Source Serif 4', serif; font-size: 26px; color: #0f172a; margin-bottom: 6px; }
         .track-hero p { font-size: 13.5px; color: #64748b; margin-bottom: 20px; }
         .track-form {
             display: flex;
@@ -181,29 +176,30 @@ if ($currentStage === 'arbitration') {
         .track-input {
             flex: 1;
             padding: 12px 16px;
-            border: 2px solid #cbd5e1;
-            border-radius: 8px;
+            border: 1.5px solid #dbe3ef;
+            border-radius: 12px;
+            background: #f8fafc;
             font-size: 15px;
             font-family: inherit;
             outline: none;
             transition: border-color 0.2s;
         }
-        .track-input:focus { border-color: #2563eb; }
+        .track-input:focus { border-color: #24508f; background: #fff; box-shadow: 0 0 0 4px rgba(36, 80, 143, .12); }
         .track-submit-btn {
-            background: #2563eb;
+            background: linear-gradient(135deg, #24508f, #0e2242);
             color: #ffffff;
             border: none;
             padding: 12px 22px;
-            border-radius: 8px;
+            border-radius: 12px;
             font-size: 14px;
-            font-weight: 600;
+            font-weight: 700;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 6px;
             transition: background 0.2s;
         }
-        .track-submit-btn:hover { background: #1d4ed8; }
+        .track-submit-btn:hover { filter: brightness(1.08); }
 
         .track-alert {
             background: #fef2f2;
@@ -226,7 +222,7 @@ if ($currentStage === 'arbitration') {
             overflow: hidden;
         }
         .track-header {
-            background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+            background: linear-gradient(135deg, #1a3a6b 0%, #24508f 100%);
             color: #ffffff;
             padding: 22px 24px;
             display: flex;
@@ -235,7 +231,7 @@ if ($currentStage === 'arbitration') {
             flex-wrap: wrap;
             gap: 12px;
         }
-        .track-case-id { font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
+        .track-case-id { font-family: 'Source Serif 4', serif; font-size: 24px; font-weight: 700; letter-spacing: 0.5px; }
         .track-case-type { font-size: 13px; opacity: 0.9; margin-top: 2px; }
         .track-status-pill {
             background: rgba(255,255,255,0.2);
@@ -296,7 +292,7 @@ if ($currentStage === 'arbitration') {
             color: #fff;
         }
         .stepper-step.active .step-circle {
-            background: #2563eb;
+            background: #24508f;
             border-color: #93c5fd;
             color: #fff;
             box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2);
@@ -308,7 +304,7 @@ if ($currentStage === 'arbitration') {
             margin: 20px 24px 0;
             background: #eff6ff;
             border: 1px solid #bfdbfe;
-            border-left: 5px solid #2563eb;
+            border-left: 5px solid #24508f;
             border-radius: 8px;
             padding: 16px 20px;
             display: flex;
@@ -317,10 +313,10 @@ if ($currentStage === 'arbitration') {
         }
         .hearing-icon {
             font-size: 24px;
-            color: #2563eb;
+            color: #24508f;
             line-height: 1;
         }
-        .hearing-info h3 { font-size: 15px; color: #1e3a8a; margin-bottom: 4px; }
+        .hearing-info h3 { font-size: 15px; color: #1a3a6b; margin-bottom: 4px; }
         .hearing-info p { font-size: 13.5px; color: #1e293b; line-height: 1.4; }
         .hearing-meta {
             margin-top: 8px;
@@ -360,7 +356,7 @@ if ($currentStage === 'arbitration') {
             width: 12px;
             height: 12px;
             border-radius: 50%;
-            background: #2563eb;
+            background: #24508f;
             border: 2px solid #fff;
             box-shadow: 0 0 0 2px #bfdbfe;
         }
@@ -395,26 +391,33 @@ if ($currentStage === 'arbitration') {
             .stepper-step { width: 100%; flex-direction: row; gap: 12px; text-align: left; }
             .step-circle { margin-bottom: 0; }
             .track-form { flex-direction: column; }
+            .track-nav { padding: 12px 16px; }
+            .track-app, .track-seal + .track-seal, .track-brand-text small { display: none; }
         }
     </style>
 </head>
 <body>
 
+    <div class="flag-bar"></div>
     <header class="track-nav">
         <a href="track.php" class="track-brand">
-            <div class="track-logo"><i class="uil uil-balance-scale"></i></div>
+            <span class="track-seal"><img src="images/seal_city_catbalogan.png" alt="Seal of the City of Catbalogan"></span>
+            <span class="track-seal"><img src="images/seal_barangay_munoz.png" alt="Seal of Barangay Muñoz"></span>
             <div class="track-brand-text">
-                <h1>GabayBatas</h1>
-                <p>Katarungang Pambarangay — Barangay Muñoz</p>
+                <small>Republic of the Philippines</small>
+                <h1>Barangay Muñoz</h1>
+                <p>City of Catbalogan, Samar</p>
             </div>
         </a>
+        <span class="track-app"><i class="uil uil-shield-check"></i><b>GabayBatas</b></span>
         <a href="login.php" class="track-login-btn">
-            <i class="uil uil-lock-alt"></i> Official Login
+            <i class="uil uil-sign-in-alt"></i> Official sign in
         </a>
     </header>
 
     <main class="track-container">
         <div class="track-hero">
+            <div class="track-hero-icon"><i class="uil uil-search-alt"></i></div>
             <h2>Track Your Case Progress</h2>
             <p>Enter your Barangay Case Number or tracking ID below to check hearing schedules and status.</p>
             <form method="GET" action="track.php" class="track-form">
@@ -501,7 +504,7 @@ if ($currentStage === 'arbitration') {
                         </div>
                         <div class="info-box">
                             <div class="info-label">Current Stage</div>
-                            <div class="info-value" style="color: <?= $kpInfo['color'] ?? '#2563eb' ?>;">
+                            <div class="info-value" style="color: <?= $kpInfo['color'] ?? '#24508f' ?>;">
                                 <?= htmlspecialchars(ucfirst($currentStage)) ?>
                             </div>
                         </div>

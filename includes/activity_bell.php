@@ -66,8 +66,9 @@ document.addEventListener('DOMContentLoaded', function () {
     pop.className = 'gb-bell-pop';
     pop.innerHTML = '<div class="gb-bell-head"><div><strong>Recent Activity</strong><small class="gb-bell-sub">Loading…</small></div>'
         + '<button type="button" class="gb-bell-read" disabled>Mark all as read</button></div>'
-        + '<div class="gb-bell-list"><div class="gb-bell-empty">Loading…</div></div>';
+        + '<div class="gb-bell-list"><div class="gb-bell-empty"><div class="gb-lottie" data-lottie="../assets/lottie/loading-dots.json" style="width:120px;height:68px" aria-hidden="true"></div>Loading…</div></div>';
     host.appendChild(pop);
+    if (window.gbLottieScan) window.gbLottieScan(pop);
     const list = pop.querySelector('.gb-bell-list');
     const sub = pop.querySelector('.gb-bell-sub');
     const readBtn = pop.querySelector('.gb-bell-read');
@@ -96,7 +97,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
         list.innerHTML = '';
         if (!items.length) {
-            list.innerHTML = '<div class="gb-bell-empty"><i class="uil uil-bell-slash"></i>' + (failed ? 'Activity could not be loaded.' : 'No recent activity yet.') + '</div>';
+            list.innerHTML = failed
+                ? '<div class="gb-bell-empty"><i class="uil uil-bell-slash"></i>Activity could not be loaded.</div>'
+                : '<div class="gb-bell-empty"><div class="gb-lottie" data-lottie="../assets/lottie/no-history.json" style="width:96px;height:96px" aria-hidden="true">'
+                  + '<i class="uil uil-bell-slash gb-lottie-fallback"></i></div>No recent activity yet.</div>';
+            if (!failed && window.gbLottieScan) window.gbLottieScan(list);
             return;
         }
         items.forEach(function (n) {

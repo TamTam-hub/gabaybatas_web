@@ -14,7 +14,6 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'barangay') {
 
 require_once '../config/database.php';
 require_once '../config/kp.php';
-require_once '../includes/kp_docx_engine.php';
 require_once '../includes/kp_monitoring.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
 gabaybatas_block_barangay_delete_requests();
@@ -338,6 +337,14 @@ $daysUntilDue = (int)(new DateTime(date('Y-m-d')))->diff(new DateTime($dueDate))
 }
 .btn-kp-success:hover { background: #15803d; }
 .btn-kp-lg { padding: 10px 24px; font-size: 14px; }
+/* UI refresh: navy buttons, clearer period picker */
+.gb-ui .btn-kp-primary { background: linear-gradient(135deg, #24508f, #0e2242); border-radius: 10px; font-weight: 700; box-shadow: 0 6px 14px rgba(26,58,107,.2); }
+.gb-ui .btn-kp-primary:hover { background: linear-gradient(135deg, #24508f, #0e2242); filter: brightness(1.08); }
+.gb-ui .btn-kp-lg { padding: 12px 24px; font-size: 14.5px; }
+.gb-ui .kp-report-selector { padding: 18px 22px; }
+.gb-ui .kp-report-month-form label { font-size: 14px; font-weight: 700; color: #14213a; }
+.gb-ui .kp-report-month-form select { min-height: 42px; font-size: 14px; border: 1.5px solid #d6deea; border-radius: 10px; padding: 0 12px; }
+.gb-ui .kp-generate-form28 { border: 1px solid #e1e7f0; border-left: 4px solid #1a3a6b; }
 .btn-kp-sm {
     display: inline-flex; align-items: center; gap: 4px; padding: 4px 12px;
     background: #16a34a; color: #fff; border: none; border-radius: 6px;

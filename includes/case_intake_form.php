@@ -314,6 +314,39 @@ if (!function_exists('gabaybatas_intake_assets')) {
 .acs-save{border:none;background:#1d4ed8;color:#fff;cursor:pointer;}
 .acs-save:hover{background:#1e40af;}
 @media(max-width:900px){.acs-body{padding:16px;}.acs-head{flex-direction:column;align-items:flex-start;}.acs-grid,.acs-grid-step{grid-template-columns:1fr;}}
+
+/* ── Barangay UI refresh (body.gb-ui only; the admin form keeps its look) ── */
+.gb-ui .acs-sub{font-size:13.5px;color:#4f5f75;}
+.gb-ui .acs-back-btn{color:#1a3a6b;background:#eef3fb;border-color:#d6e2f5;border-radius:10px;padding:9px 14px;font-size:13px;}
+.gb-ui .acs-back-btn:hover{background:#dfe8f7;}
+.gb-ui .acs-form{gap:16px;}
+.gb-ui .acs-card{padding:22px 24px;}
+.gb-ui .acs-card-title{font-size:15.5px;gap:10px;margin-bottom:16px;color:#14213a;}
+.gb-ui .acs-card-title i{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;background:#eef3fb;color:#1a3a6b;font-size:17px;}
+.gb-ui .acs-grid{gap:14px 16px;}
+.gb-ui .acs-field{gap:7px;}
+.gb-ui .acs-field label{font-size:13px;letter-spacing:.1px;text-transform:none;color:#334155;font-weight:700;}
+.gb-ui .acs-field input,.gb-ui .acs-field select,.gb-ui .acs-field textarea{min-height:44px;padding:11px 13px;font-size:14.5px;color:#14213a;background:#fff;border:1.5px solid #d6deea;border-radius:10px;transition:border-color .15s,box-shadow .15s;}
+.gb-ui .acs-field textarea{min-height:110px;line-height:1.6;}
+.gb-ui .acs-field input:focus,.gb-ui .acs-field select:focus,.gb-ui .acs-field textarea:focus{border-color:#24508f;box-shadow:0 0 0 4px rgba(36,80,143,.12);}
+.gb-ui .acs-field input[readonly]{background:#f5f7fb;color:#4f5f75;}
+.gb-ui .acs-hint{font-size:12.5px;color:#6f7f96;}
+.gb-ui .acs-error{font-size:12.5px;}
+.gb-ui .acs-alert{font-size:13.5px;padding:12px 14px;border-radius:12px;}
+.gb-ui .acs-status{font-size:14px;min-height:44px;}
+.gb-ui .acs-step{gap:14px;padding:16px 0;}
+.gb-ui .acs-step-num{width:30px;height:30px;background:linear-gradient(135deg,#24508f,#0e2242);box-shadow:0 4px 10px rgba(26,58,107,.25);}
+.gb-ui .acs-step-title{font-size:14.5px;color:#14213a;}
+.gb-ui .acs-linked{font-size:13px;color:#4f5f75;}
+.gb-ui .acs-preview{border-left-color:#1a3a6b;border-radius:12px;padding:14px 16px;}
+.gb-ui .acs-preview-label{color:#1a3a6b;}
+.gb-ui .acs-preview p{font-size:14px;line-height:1.7;}
+/* The Save bar stays in view at the bottom of long forms */
+.gb-ui .acs-actions{position:sticky;bottom:0;z-index:5;margin:0;padding:12px 16px;border:1px solid #dde4ef;border-radius:14px;background:rgba(255,255,255,.94);backdrop-filter:blur(6px);box-shadow:0 -6px 20px rgba(15,23,42,.06);}
+.gb-ui .acs-cancel,.gb-ui .acs-save{font-size:14px;font-weight:700;border-radius:10px;padding:11px 18px;}
+.gb-ui .acs-cancel{border:1.5px solid #d6deea;color:#334155;}
+.gb-ui .acs-save{background:linear-gradient(135deg,#24508f,#0e2242);box-shadow:0 8px 18px rgba(26,58,107,.22);}
+.gb-ui .acs-save:hover{background:linear-gradient(135deg,#24508f,#0e2242);filter:brightness(1.08);}
 </style>
         <?php
     }

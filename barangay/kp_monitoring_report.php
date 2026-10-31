@@ -42,5 +42,7 @@ $dompdf->render();
 
 // e.g. KP_Monitoring_Form_1_October_2026.pdf
 $filename = sprintf('KP_Monitoring_Form_1_%s_%04d.pdf', date('F', mktime(0, 0, 0, $month, 1, $year)), $year);
+require_once __DIR__ . '/../includes/download_signal.php';
+gabaybatas_download_ready();
 $dompdf->stream($filename, ['Attachment' => true]);
 exit();

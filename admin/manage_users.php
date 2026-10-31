@@ -492,7 +492,12 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                 </tr>
                 <?php endwhile; ?>
                 <?php else: ?>
-                <tr><td colspan="9" class="um-empty">No users found.</td></tr>
+                <?php $umFiltered = $search !== '' || $roleFilter !== '' || $statusFilter !== ''; ?>
+                <tr><td colspan="9" class="um-empty">
+                    <?= gabaybatas_lottie($umFiltered ? 'search-file' : 'empty-box', 130, 'uil-users-alt') ?>
+                    <strong><?= $umFiltered ? 'No users match these filters' : 'No users yet' ?></strong>
+                    <span><?= $umFiltered ? 'Try a different search or clear the filters.' : 'Registered accounts will appear here.' ?></span>
+                </td></tr>
                 <?php endif; ?>
                 </tbody>
             </table>
@@ -569,7 +574,9 @@ if (window.AdminToast) {
 .um-action-btn.edit:hover{background:#dbeafe;}
 .um-action-btn.delete{background:#fff1f2;color:#ef4444;border:1px solid #fecdd3;}
 .um-action-btn.delete:hover{background:#fecdd3;}
-.um-empty{text-align:center;color:#94a3b8;padding:32px!important;font-size:13px;}
+.um-empty{text-align:center!important;color:#94a3b8;padding:32px!important;font-size:13px;}
+.um-empty strong{display:block;color:#334155;font-size:14px;}
+.um-empty span{display:block;}
 .um-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-top:1px solid #f1f5f9;background:#fcfdff;}
 .um-page-meta{font-size:12px;color:#64748b;}
 .um-pagination{display:flex;align-items:center;gap:10px;}

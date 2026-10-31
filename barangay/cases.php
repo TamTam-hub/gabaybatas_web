@@ -183,7 +183,7 @@ $result = $conn->query($query);
                                 <td><?= htmlspecialchars((string)($row['complained_person'] ?? 'N/A')) ?></td>
                                 <td><?= htmlspecialchars((string)($row['case_type'] ?? 'N/A')) ?></td>
                                 <td><span class="badge-status kp-styled" style="background:<?= $statusColor ?>18; color:<?= $statusColor ?>; border:1px solid <?= $statusColor ?>35;"><?= htmlspecialchars($statusLabel) ?></span></td>
-                                <td><?= htmlspecialchars($dateDisplay) ?></td>
+                                <td class="cs-date"><?php if ($dateTs !== false): ?><strong><?= date('M d, Y', $dateTs) ?></strong><small><?= date('h:i A', $dateTs) ?></small><?php else: ?><?= htmlspecialchars($dateDisplay) ?><?php endif; ?></td>
                                 <td>
                                     <div class="action-group">
                                         <a href="view_case.php?id=<?= (int)($row['id'] ?? 0) ?>" class="table-action"><i class="uil uil-eye"></i> View</a>
@@ -199,7 +199,8 @@ $result = $conn->query($query);
                         <tr>
                             <td colspan="7">
                                 <div class="empty-state">
-                                    <div class="empty-title">No cases found</div>
+                                    <?= gabaybatas_lottie(($search_raw !== '' || $filter_raw !== '') ? 'search-file' : 'empty-box', 130) ?>
+                                    <div class="empty-title"><?= ($search_raw !== '' || $filter_raw !== '') ? 'No cases match these filters' : 'No cases yet' ?></div>
                                     <div class="empty-sub"><?= ($search_raw !== '' || $filter_raw !== '') ? 'Try adjusting your search or filter criteria.' : 'No cases have been recorded yet.' ?></div>
                                 </div>
                             </td>
@@ -289,7 +290,20 @@ $result = $conn->query($query);
     box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
 }
 .table-action i { font-size:14px; }
-.card-box .gb-pg { margin:14px -24px -22px; border-radius:0 0 8px 8px; }
+.card-box .gb-pg { margin:14px -24px -22px; border-radius:0 0 14px 14px; }
+/* UI refresh */
+.gb-ui .page-header-title { font-size:22px; color:#0b1a33; }
+.gb-ui .page-header-sub { font-size:13.5px; color:#4f5f75; }
+.gb-ui .btn-add-case { padding:10px 18px; font-size:14px; font-weight:700; background:linear-gradient(135deg,#24508f,#0e2242); border-color:transparent; box-shadow:0 8px 18px rgba(26,58,107,.22); }
+.gb-ui .filter-field-label { font-size:13px; font-weight:700; color:#334155; margin-bottom:7px; }
+.gb-ui .filter-input { min-height:44px; font-size:14px; border:1.5px solid #d6deea; border-radius:10px; }
+.gb-ui .filter-input:focus { border-color:#24508f; box-shadow:0 0 0 4px rgba(36,80,143,.12); }
+.gb-ui .btn-filter, .gb-ui .btn-reset { min-height:44px; padding:10px 16px; font-size:13.5px; }
+.gb-ui .record-count { background:#eef3fb; color:#1a3a6b; padding:6px 12px; border-radius:999px; font-weight:700; }
+.gb-ui .table-action-kp { background:linear-gradient(135deg,#24508f,#0e2242); border-color:#0e2242; box-shadow:0 4px 10px rgba(26,58,107,.22); }
+.gb-ui .table-action-kp:hover { background:linear-gradient(135deg,#24508f,#0e2242); filter:brightness(1.1); }
+.cs-date strong { display:block; font-weight:600; white-space:nowrap; }
+.cs-date small { display:block; font-size:12.5px; color:#6f7f96; }
 .empty-state { padding:24px 12px; text-align:center; }
 .empty-title { font-size:14px; font-weight:700; color:var(--text-main); margin-bottom:6px; }
 .empty-sub { font-size:12.5px; color:var(--text-light); }

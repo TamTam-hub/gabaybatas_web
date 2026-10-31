@@ -702,8 +702,92 @@
         .admin-confirm-overlay.danger .admin-confirm-btn.primary:hover { background: #b91c1c; border-color: #b91c1c; }
 
         }
+
+        /* ═══ UI refresh (barangay pages) ═══════════════════════════════════
+           Same navy theme as the login page; clearer text, softer cards, left-aligned
+           tables and visible focus rings. Scoped to body.gb-ui so it also wins over
+           older page-level styles. Information and flow are unchanged. */
+        :root {
+            --page-bg:    #eef2f8;
+            --border:     #dde4ef;
+            --text-main:  #14213a;
+            --text-muted: #4f5f75;
+            --text-light: #6f7f96;
+            --navy-900:   #0b1a33;
+        }
+        body.gb-ui { font-size: 14.5px; -webkit-font-smoothing: antialiased; line-height: 1.5; }
+
+        /* Sidebar */
+        .gb-ui .sidebar {
+            background: radial-gradient(circle at 0% 0%, rgba(255,255,255,.08), transparent 45%), linear-gradient(175deg, #1a3a6b 0%, #0e2242 70%, #0b1a33 100%);
+            border-right: 0; box-shadow: 4px 0 24px rgba(11, 26, 51, .12);
+        }
+        .gb-ui .sidebar-brand { padding: 22px 20px 18px; border-bottom-color: rgba(255,255,255,.08); }
+        .gb-ui .brand-shield { width: 40px; height: 40px; border-radius: 11px; background: rgba(255,255,255,.14); box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); font-size: 20px; }
+        .gb-ui .brand-name { font-size: 18px; }
+        .gb-ui .brand-sub { color: rgba(255,255,255,.62); margin-top: 4px; }
+        .gb-ui .sidebar-section { color: rgba(255,255,255,.45); font-weight: 700; padding: 20px 14px 8px; }
+        .gb-ui .sidebar nav { padding: 0 12px; }
+        .gb-ui .sidebar a { padding: 11px 14px; margin-bottom: 3px; border-radius: 10px; font-size: 14px; color: rgba(255,255,255,.82); }
+        .gb-ui .sidebar a i { font-size: 18px; }
+        .gb-ui .sidebar a:hover { background: rgba(255,255,255,.09); color: #fff; }
+        .gb-ui .sidebar a.active { background: #fff; color: var(--navy-deeper); font-weight: 700; box-shadow: 0 6px 16px rgba(0,0,0,.18); }
+        .gb-ui .sidebar a.active i { color: var(--navy); }
+        .gb-ui .sidebar-footer { padding: 12px; border-top-color: rgba(255,255,255,.08); }
+        .gb-ui .sidebar-footer a { border-radius: 10px; color: rgba(255,255,255,.7); font-size: 14px; }
+
+        /* Top bar: flag strip, plain serif title */
+        .gb-ui .topbar {
+            height: 66px; padding: 0 32px; border-bottom: 1px solid var(--border);
+            background: rgba(255,255,255,.96); backdrop-filter: blur(6px); box-shadow: 0 1px 0 rgba(15,23,42,.02);
+        }
+        .gb-ui .topbar::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #1a3a6b 0 33%, #b91c1c 33% 66%, #c9a227 66%); }
+        .gb-ui .topbar-title {
+            background: none; border: 0; box-shadow: none; padding: 0; border-radius: 0;
+            font-size: 23px; color: var(--navy-900); letter-spacing: 0;
+        }
+        .gb-ui .icon-btn { width: 38px; height: 38px; border-radius: 10px; }
+        .gb-ui .user-pill { border-radius: 12px; padding: 5px 8px; }
+        .gb-ui .user-avatar { width: 34px; height: 34px; background: linear-gradient(135deg, #24508f, #0e2242); }
+        .gb-ui .user-text strong { font-size: 13.5px; }
+        .gb-ui .user-text span { font-size: 12px; color: var(--text-light); }
+
+        /* Page and cards */
+        .gb-ui .page-body { padding: 28px 32px 40px; }
+        .gb-ui .card-box {
+            border-radius: 14px; border-color: #e1e7f0;
+            box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045);
+        }
+        .gb-ui .card-box:hover { transform: none; border-color: #d3dcea; box-shadow: 0 1px 2px rgba(15,23,42,.05), 0 12px 30px rgba(15,23,42,.07); }
+        .gb-ui .section-heading { color: var(--text-main); }
+        .gb-ui .section-heading-sub { color: var(--text-light); }
+
+        /* Tables: left-aligned, roomier, no jumping rows */
+        .gb-ui .table-dashboard thead th {
+            background: #f5f7fb; color: #5b6b82; font-size: 11.5px; font-weight: 700; letter-spacing: .7px;
+            padding: 13px 16px; text-align: left; border-bottom: 1px solid var(--border);
+        }
+        .gb-ui .table-dashboard tbody td { padding: 15px 16px; font-size: 14px; text-align: left; border-bottom-color: #edf1f7; }
+        .gb-ui .table-dashboard tbody tr:hover { transform: none; box-shadow: none; }
+        .gb-ui .table-dashboard tbody tr:hover td { background: #f6f9ff; }
+        .gb-ui .table-dashboard .action-group { justify-content: flex-start; }
+
+        /* Badges and buttons */
+        .gb-ui .badge-status { border-radius: 999px; padding: 5px 11px; font-size: 12px; white-space: nowrap; }
+        .gb-ui .table-action { border-radius: 9px; padding: 7px 12px; font-size: 13px; }
+        .gb-ui .btn-add-case, .gb-ui .btn-filter, .gb-ui .btn-reset, .gb-ui .btn-submit, .gb-ui .btn-cancel,
+        .gb-ui .btn-download, .gb-ui .btn-edit, .gb-ui .acs-save, .gb-ui .acs-cancel, .gb-ui .acs-back-btn,
+        .gb-ui .uc-save, .gb-ui .uc-cancel, .gb-ui .uc-back-btn, .gb-ui .vc-update-btn, .gb-ui .vc-back-btn { border-radius: 10px; }
+
+        /* Keyboard focus is always visible */
+        .gb-ui a:focus-visible, .gb-ui button:focus-visible, .gb-ui input:focus-visible,
+        .gb-ui select:focus-visible, .gb-ui textarea:focus-visible, .gb-ui summary:focus-visible {
+            outline: 3px solid rgba(36, 80, 143, .4); outline-offset: 2px;
+        }
+        .gb-ui .sidebar a:focus-visible { outline-color: rgba(255,255,255,.6); }
     </style>
     <?php $gbBellEndpoint = 'notifications.php'; include __DIR__ . '/activity_bell.php'; ?>
+    <?php require_once __DIR__ . '/lottie.php'; gabaybatas_lottie_loader(); ?>
     <script>
     window.AdminToast = window.AdminToast || (function () {
         let host = null;
@@ -730,7 +814,10 @@
             const toast = document.createElement('div');
             const t = type || 'info';
             toast.className = 'admin-toast ' + t;
-            toast.innerHTML = '<div class="admin-toast-icon"><i class="uil ' + iconFor(t) + '"></i></div>' +
+            const icon = t === 'success'
+                ? '<div class="gb-lottie" data-lottie="../assets/lottie/success.json" data-lottie-once style="width:34px;height:34px"><i class="uil uil-check-circle gb-lottie-fallback"></i></div>'
+                : '<i class="uil ' + iconFor(t) + '"></i>';
+            toast.innerHTML = '<div class="admin-toast-icon">' + icon + '</div>' +
                 '<div class="admin-toast-body"><div class="admin-toast-title"></div><div class="admin-toast-message"></div></div>' +
                 '<button type="button" class="admin-toast-close" aria-label="Close">&times;</button>';
 
@@ -738,6 +825,7 @@
             toast.querySelector('.admin-toast-message').textContent = message || '';
 
             root.appendChild(toast);
+            if (window.gbLottieScan) window.gbLottieScan(toast);
             requestAnimationFrame(function () { toast.classList.add('show'); });
 
             const life = typeof timeout === 'number' ? timeout : 3600;
@@ -944,4 +1032,4 @@
     });
     </script>
 </head>
-<body>
+<body class="gb-ui">

@@ -210,4 +210,6 @@ $canvas->page_text(
     'Page {PAGE_NUM} of {PAGE_COUNT}',
     $dompdf->getFontMetrics()->getFont('DejaVu Sans'), 7, [0.35, 0.42, 0.49]
 );
+require_once __DIR__ . '/../includes/download_signal.php';
+gabaybatas_download_ready();
 $dompdf->stream($filename, ['Attachment' => true]);

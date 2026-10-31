@@ -174,7 +174,7 @@ $dateCell = static function ($value): string {
         <p class="ar-intro">Archived records are kept for official and legal reference. Restoring a record returns it to the active lists; the archive history stays in the audit log.</p>
 
         <?php if ($flash): ?>
-        <div class="ar-alert <?= $flash['type'] === 'success' ? 'is-success' : 'is-error' ?>"><i class="uil <?= $flash['type'] === 'success' ? 'uil-check-circle' : 'uil-exclamation-circle' ?>"></i><?= htmlspecialchars($flash['message']) ?></div>
+        <div class="ar-alert <?= $flash['type'] === 'success' ? 'is-success' : 'is-error' ?>"><?= $flash['type'] === 'success' ? gabaybatas_lottie('success', 24, 'uil-check-circle', true) : '<i class="uil uil-exclamation-circle"></i>' ?><?= htmlspecialchars($flash['message']) ?></div>
         <?php endif; ?>
 
         <nav class="ar-tabs" aria-label="Archive sections">
@@ -272,7 +272,7 @@ $dateCell = static function ($value): string {
                     </tbody>
                     <?php endif; ?>
                     <?php if (!$rows): ?>
-                    <tbody><tr><td colspan="7"><div class="ar-empty"><i class="uil uil-archive"></i><strong><?= $hasFilters ? 'No archived ' . $tab . ' match these filters' : 'No archived ' . $tab . ' yet' ?></strong><span><?= $hasFilters ? 'Try a different search or clear the filters.' : 'Records you archive will appear here.' ?></span></div></td></tr></tbody>
+                    <tbody><tr><td colspan="7"><div class="ar-empty"><?= gabaybatas_lottie($hasFilters ? 'search-file' : 'empty-box', 130, 'uil-archive') ?><strong><?= $hasFilters ? 'No archived ' . $tab . ' match these filters' : 'No archived ' . $tab . ' yet' ?></strong><span><?= $hasFilters ? 'Try a different search or clear the filters.' : 'Records you archive will appear here.' ?></span></div></td></tr></tbody>
                     <?php endif; ?>
                 </table>
             </div>

@@ -8,6 +8,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'barangay') {
 
 require_once '../config/database.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
+require_once __DIR__ . '/../includes/flexible_report.php';
 
 gabaybatas_block_barangay_delete_requests();
 
@@ -179,32 +180,11 @@ if ($displayBarangay === 'Barangay' && $currentBarangay !== '') {
     $_SESSION['barangay'] = $displayBarangay;
 }
 
-$hasCaseBarangay = gabaybatas_table_has_column($conn, 'cases', 'barangay');
-$hasCaseStatus = gabaybatas_table_has_column($conn, 'cases', 'status');
-$caseScopeSql = '';
-if ($hasCaseBarangay && $currentBarangay !== '') {
-    $caseScopeSql = " AND LOWER(barangay) = LOWER('" . $conn->real_escape_string($currentBarangay) . "')";
-}
-
-$totalCases = 0;
-$resolvedCases = 0;
-$resolutionRate = 0;
-
-$totalResult = $conn->query('SELECT COUNT(*) AS c FROM cases WHERE 1=1' . $caseScopeSql);
-if ($totalResult) {
-    $totalCases = (int)($totalResult->fetch_assoc()['c'] ?? 0);
-}
-
-if ($hasCaseStatus) {
-    $resolvedResult = $conn->query("SELECT COUNT(*) AS c FROM cases WHERE 1=1" . $caseScopeSql . " AND status='Resolved'");
-    if ($resolvedResult) {
-        $resolvedCases = (int)($resolvedResult->fetch_assoc()['c'] ?? 0);
-    }
-}
-
-if ($totalCases > 0) {
-    $resolutionRate = (int)round(($resolvedCases / $totalCases) * 100);
-}
+// Same KP status groups as Home, Flexible Reports and Analytics; archived cases are not counted.
+$caseSummary = gabaybatas_case_group_counts($conn, $currentBarangay);
+$totalCases = $caseSummary['total'];
+$resolvedCases = $caseSummary['counts']['settled'];
+$resolutionRate = $totalCases > 0 ? (int)round(($resolvedCases / $totalCases) * 100) : 0;
 
 $profileNameForForm = $displayName;
 $profileEmailForForm = $displayEmail === 'Not set' ? '' : $displayEmail;
@@ -321,12 +301,12 @@ include('../includes/sidebar_barangay.php');
                 <div class="stat-mini stat-mini-green">
                     <div class="stat-mini-icon"><i class="uil uil-check-circle"></i></div>
                     <div class="stat-num"><?= (int)$resolvedCases ?></div>
-                    <div class="stat-text">Cases Resolved</div>
+                    <div class="stat-text">Settled / Awarded</div>
                 </div>
                 <div class="stat-mini stat-mini-purple">
                     <div class="stat-mini-icon"><i class="uil uil-chart-line"></i></div>
                     <div class="stat-num"><?= (int)$resolutionRate ?>%</div>
-                    <div class="stat-text">Resolution Rate</div>
+                    <div class="stat-text">Settled or awarded, of all cases</div>
                     <div class="rate-bar-wrap"><div class="rate-bar" style="width:<?= (int)$resolutionRate ?>%;"></div></div>
                 </div>
             </div>
@@ -540,6 +520,10 @@ if (profileHealthInput && profileHealthBadge && profileHealthBar && profileHealt
 .profile-alert-error{background:#fff1f2;border:1px solid #fecdd3;color:#be123c;}
 .profile-alert-success{background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;}
 .profile-hero { display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; padding:24px 28px; background:var(--navy); border-color:var(--navy); }
+/* UI refresh: banner like Home */
+.gb-ui .profile-hero { border-radius:16px; border:0; background:radial-gradient(circle at 0% 0%, rgba(255,255,255,.10), transparent 45%), linear-gradient(135deg, #1a3a6b 0%, #0e2242 70%, #0b1a33 100%); box-shadow:0 14px 34px rgba(14,34,66,.22); }
+.gb-ui .profile-hero:hover { border-color:transparent; box-shadow:0 14px 34px rgba(14,34,66,.22); }
+.gb-ui .info-item label { font-size:12.5px; font-weight:700; text-transform:none; letter-spacing:.1px; color:#334155; }
 .hero-left { display:flex; align-items:center; gap:20px; }
 .profile-avatar { width:80px; height:80px; border-radius:50%; background:rgba(255,255,255,.18); border:2px solid rgba(255,255,255,.3); color:#fff; display:flex; align-items:center; justify-content:center; font-family:'Source Serif 4',serif; font-size:26px; font-weight:700; flex-shrink:0; letter-spacing:1px; }
 .hero-info h2 { font-family:'Source Serif 4',serif; font-size:22px; font-weight:700; color:#fff; margin:0 0 4px; }

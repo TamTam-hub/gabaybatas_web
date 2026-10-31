@@ -228,7 +228,7 @@ require_once '../includes/sidebar_admin.php';
             <div><div class="rv-kicker"><i class="uil uil-shield-check"></i> Resident identity desk</div><p>Review identity and address submissions for <?= htmlspecialchars($pageBarangay) ?>.</p></div>
         </div>
 
-        <?php if ($message !== ''): ?><div class="rv-alert <?= $messageType === 'error' ? 'is-error' : 'is-success' ?>"><i class="uil <?= $messageType === 'error' ? 'uil-exclamation-circle' : 'uil-check-circle' ?>"></i><span><?= htmlspecialchars($message) ?></span></div><?php endif; ?>
+        <?php if ($message !== ''): ?><div class="rv-alert <?= $messageType === 'error' ? 'is-error' : 'is-success' ?>"><?= $messageType === 'error' ? '<i class="uil uil-exclamation-circle"></i>' : gabaybatas_lottie('success', 24, 'uil-check-circle', true) ?><span><?= htmlspecialchars($message) ?></span></div><?php endif; ?>
 
         <div class="rv-stats">
             <?php foreach ([['pending','Pending','uil-clock','amber'],['approved','Approved','uil-check-circle','green'],['resubmit','Resubmission','uil-refresh','blue'],['all','Total submissions','uil-files-landscapes','slate']] as $stat): ?>
@@ -251,7 +251,7 @@ require_once '../includes/sidebar_admin.php';
                 </nav>
             </div>
             <div class="rv-table-wrap"><table class="rv-table"><thead><tr><th>Resident</th><th>Address</th><th>Identity</th><th>Documents</th><th>Status</th><th>Submitted</th><th class="rv-review-col">Review</th></tr></thead><tbody>
-            <?php if (!$rows): ?><tr><td colspan="7"><div class="rv-empty"><i class="uil uil-folder-check"></i><strong>No submissions in this view</strong><span>New resident verification requests will appear here.</span></div></td></tr><?php endif; ?>
+            <?php if (!$rows): ?><tr><td colspan="7"><div class="rv-empty"><?= gabaybatas_lottie($searchTerm !== '' ? 'search-file' : 'empty-box', 130, 'uil-folder-check') ?><strong><?= $searchTerm !== '' ? 'No submissions match your search' : 'No submissions in this view' ?></strong><span>New resident verification requests will appear here.</span></div></td></tr><?php endif; ?>
             <?php foreach ($rows as $row): $rowStatus = strtolower(trim((string)$row['status'])); $statusClass = in_array($rowStatus, ['approved','rejected','resubmit'], true) ? $rowStatus : 'pending'; ?>
                 <tr>
                     <td><div class="rv-person"><span class="rv-avatar"><?= htmlspecialchars(strtoupper(substr((string)$row['full_name'], 0, 1))) ?></span><span><strong><?= htmlspecialchars((string)$row['full_name']) ?></strong><small><?= htmlspecialchars((string)($row['email'] ?? '')) ?></small></span></div></td>

@@ -271,9 +271,11 @@ $buildQuery = static function (array $base, array $override = []): string {
                 </tr>
                 <?php endwhile; ?>
                 <?php else: ?>
+                <?php $acFiltered = $search !== '' || $filterStatus !== '' || $filterType !== ''; ?>
                 <tr><td colspan="7" class="ac-empty">
-                    <i class="uil uil-folder-open" style="font-size:28px;display:block;margin-bottom:8px;color:#cbd5e1"></i>
-                    No cases found.
+                    <?= gabaybatas_lottie($acFiltered ? 'search-file' : 'empty-box', 130) ?>
+                    <strong><?= $acFiltered ? 'No cases match these filters' : 'No cases yet' ?></strong>
+                    <span><?= $acFiltered ? 'Try a different search or clear the filters.' : 'New complaints will appear here.' ?></span>
                 </td></tr>
                 <?php endif; ?>
                 </tbody>
@@ -385,7 +387,9 @@ document.querySelectorAll('.fade-up').forEach(el=>fo.observe(el));
 .ac-dropdown-item:last-child{border-radius:0 0 9px 9px;}
 .ac-dropdown-item.ac-delete{color:#dc2626;}
 .ac-dropdown-item.ac-delete:hover{background:#fef2f2;color:#b91c1c;}
-.ac-empty{text-align:center;color:#94a3b8;padding:60px 40px!important;font-size:14px;line-height:1.6;}
+.ac-empty{text-align:center!important;color:#94a3b8;padding:36px 40px!important;font-size:13px;line-height:1.6;}
+.ac-empty strong{display:block;color:#334155;font-size:14px;}
+.ac-empty span{display:block;}
 
 .ac-footer{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 24px;border-top:1px solid #f1f5f9;background:#fcfdff;}
 .ac-page-meta{font-size:13px;color:#64748b;font-weight:500;}

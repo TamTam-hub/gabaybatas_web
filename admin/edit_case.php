@@ -198,6 +198,7 @@ $justSaved = ($_GET['saved'] ?? '') === '1';
                 : window.confirm(options.title + '\n\n' + options.message);
             if (!ok) return;
             confirmed = true;
+            if (window.gbLoading) window.gbLoading.show('Saving changes…');
             form.submit();
         });
     }
