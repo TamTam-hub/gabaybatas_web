@@ -97,6 +97,7 @@ if ($currentStage === 'arbitration') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Track Your KP Case — GabayBatas Barangay Muñoz</title>
+    <?php require_once __DIR__ . '/includes/brand_mark.php'; echo gabaybatas_favicon_links(); ?>
     <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://unicons.iconscout.com/release/v4.0.8/css/line.css" rel="stylesheet">
     <style>
@@ -395,6 +396,7 @@ if ($currentStage === 'arbitration') {
             .track-app, .track-seal + .track-seal, .track-brand-text small { display: none; }
         }
     </style>
+    <script src="assets/js/placeholder-marquee.js" defer></script>
 </head>
 <body>
 
@@ -409,7 +411,7 @@ if ($currentStage === 'arbitration') {
                 <p>City of Catbalogan, Samar</p>
             </div>
         </a>
-        <span class="track-app"><i class="uil uil-shield-check"></i><b>GabayBatas</b></span>
+        <span class="track-app"><i class="gb-mark"><?= gabaybatas_brand_mark() ?></i><b>GabayBatas</b></span>
         <a href="login.php" class="track-login-btn">
             <i class="uil uil-sign-in-alt"></i> Official sign in
         </a>

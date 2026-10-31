@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GabayBatas — Barangay Portal</title>
+    <?php require_once __DIR__ . '/brand_mark.php'; echo gabaybatas_favicon_links('../'); ?>
 
     <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://unicons.iconscout.com/release/v4.0.8/css/line.css" rel="stylesheet">
@@ -788,6 +789,8 @@
     </style>
     <?php $gbBellEndpoint = 'notifications.php'; include __DIR__ . '/activity_bell.php'; ?>
     <?php require_once __DIR__ . '/lottie.php'; gabaybatas_lottie_loader(); ?>
+    <script src="../assets/js/placeholder-marquee.js" defer></script>
+    <?php require_once __DIR__ . '/logout_confirm.php'; gabaybatas_logout_confirm('Barangay'); ?>
     <script>
     window.AdminToast = window.AdminToast || (function () {
         let host = null;
@@ -917,22 +920,6 @@
 
         return { confirm: confirm };
     })();
-
-    document.addEventListener('DOMContentLoaded', function () {
-        const logoutLink = document.querySelector('.sidebar-footer a[href="../logout.php"]');
-        if (!logoutLink || !window.AdminConfirm) return;
-
-        logoutLink.addEventListener('click', async function (e) {
-            e.preventDefault();
-            const ok = await window.AdminConfirm.confirm({
-                title: 'Logout Now?',
-                message: 'You will be signed out of the Barangay portal.',
-                confirmText: 'Logout',
-                cancelText: 'Stay Here'
-            });
-            if (ok) window.location.href = logoutLink.href;
-        });
-    });
 
     document.addEventListener('DOMContentLoaded', function () {
 

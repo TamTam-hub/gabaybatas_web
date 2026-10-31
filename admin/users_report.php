@@ -7,6 +7,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 
 require_once '../config/database.php';
 require_once '../config/barangays.php';
+require_once '../includes/case_selection.php';
 
 $userColumns = [];
 $userColResult = $conn->query('SHOW COLUMNS FROM users');
@@ -32,37 +33,87 @@ $createdColumn = $hasUserColumn('created_at') ? 'created_at' : 'NULL';
 $search = trim((string)($_GET['search'] ?? ''));
 $roleFilter = trim((string)($_GET['role'] ?? ''));
 $statusFilter = trim((string)($_GET['status'] ?? ''));
-$barangayFilter = '';
 $sort = trim((string)($_GET['sort'] ?? 'newest'));
+if (!in_array($sort, ['newest', 'oldest', 'name_asc', 'name_desc'], true)) $sort = 'newest';
 $includeAll = (string)($_GET['include_all'] ?? '0') === '1';
 $download = (string)($_GET['download'] ?? '') === 'pdf';
+$roleLabels = ['admin' => 'Administrator', 'barangay' => 'Barangay Official', 'resident' => 'Resident'];
+$roleLabel = static fn(string $r): string => $roleLabels[strtolower($r)] ?? ucwords($r);
+
+// Registration period, same choices as the Case Report.
+$period = (string)($_GET['period'] ?? 'all');
+if (!in_array($period, ['all', 'month', 'quarter', 'year', 'custom'], true)) $period = 'all';
+$validDate = static function ($v): string {
+    $v = trim((string)$v);
+    $d = DateTime::createFromFormat('Y-m-d', $v);
+    return $d && $d->format('Y-m-d') === $v ? $v : '';
+};
+$dateFrom = $period === 'custom' ? $validDate($_GET['date_from'] ?? '') : '';
+$dateTo = $period === 'custom' ? $validDate($_GET['date_to'] ?? '') : '';
+if ($dateFrom !== '' && $dateTo !== '' && $dateFrom > $dateTo) [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
+
+// Specific users: the rows ticked in the preview (?users=10,13).
+$selectedUsers = [];
+foreach (preg_split('/[\s,;]+/', (string)($_GET['users'] ?? '')) as $token) {
+    if (ctype_digit($token) && (int)$token > 0) $selectedUsers[(int)$token] = true;
+}
+$selectedUsers = array_slice(array_keys($selectedUsers), 0, 200);
 
 $conditions = [];
 // Archived accounts are never reported, same as the case reports.
 if ($hasUserColumn('archived_at')) {
     $conditions[] = 'archived_at IS NULL';
 }
-if (!$includeAll) {
+$applied = [];
+$periodLabel = '';
+if ($selectedUsers) {
+    // Specific users replace the other filters.
+    $conditions[] = "{$idColumn} IN (" . implode(',', $selectedUsers) . ')';
+} elseif (!$includeAll) {
     if ($search !== '') {
         $s = $conn->real_escape_string($search);
-        if ($hasUserColumn('email')) {
-            $conditions[] = "({$nameColumn} LIKE '%$s%' OR {$emailColumn} LIKE '%$s%')";
-        } else {
-            $conditions[] = "{$nameColumn} LIKE '%$s%'";
-        }
+        $searchCols = [$nameColumn];
+        if ($hasUserColumn('email')) $searchCols[] = $emailColumn;
+        if ($hasUserColumn('username')) $searchCols[] = 'username';
+        $conditions[] = '(' . implode(' OR ', array_map(static fn($c) => "{$c} LIKE '%$s%'", $searchCols)) . ')';
+        $applied[] = 'Search: “' . $search . '”';
     }
-
     if ($roleFilter !== '' && $hasUserColumn('role')) {
         $rf = $conn->real_escape_string($roleFilter);
         $conditions[] = "LOWER({$roleColumn}) = LOWER('$rf')";
+        $applied[] = 'Role: ' . $roleLabel($roleFilter);
     }
-
     if ($statusFilter !== '' && $hasUserColumn('status')) {
         $sf = $conn->real_escape_string($statusFilter);
         $conditions[] = "LOWER({$statusColumn}) = LOWER('$sf')";
+        $applied[] = 'Status: ' . ucfirst(strtolower($statusFilter));
+    }
+    if ($period !== 'all' && $hasUserColumn('created_at')) {
+        $now = new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
+        $range = null;
+        if ($period === 'month') {
+            $range = [$now->format('Y-m-01'), $now->format('Y-m-t')];
+            $periodLabel = $now->format('F Y');
+        } elseif ($period === 'quarter') {
+            $q = (int)ceil((int)$now->format('n') / 3);
+            $start = $now->setDate((int)$now->format('Y'), ($q - 1) * 3 + 1, 1);
+            $range = [$start->format('Y-m-d'), $start->modify('+2 months')->format('Y-m-t')];
+            $periodLabel = 'Quarter ' . $q . ' of ' . $now->format('Y');
+        } elseif ($period === 'year') {
+            $range = [$now->format('Y-01-01'), $now->format('Y-12-31')];
+            $periodLabel = 'Year ' . $now->format('Y');
+        } elseif ($dateFrom !== '' || $dateTo !== '') {
+            $range = [$dateFrom ?: '1970-01-01', $dateTo ?: '9999-12-31'];
+            $fmt = static fn(string $d): string => date('M j, Y', strtotime($d));
+            $periodLabel = $dateFrom !== '' && $dateTo !== '' ? $fmt($dateFrom) . ' – ' . $fmt($dateTo)
+                : ($dateFrom !== '' ? 'From ' . $fmt($dateFrom) : 'Until ' . $fmt($dateTo));
+        }
+        if ($range) {
+            $conditions[] = "DATE(created_at) BETWEEN '{$range[0]}' AND '{$range[1]}'";
+            $applied[] = 'Registered: ' . $periodLabel;
+        }
     }
 }
-
 
 $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
 
@@ -107,20 +158,6 @@ if ($hasUserColumn('status')) {
     }
 }
 
-$barangayOptions = gabaybatas_get_barangays();
-
-$activeFilters = [];
-if ($includeAll) {
-    $activeFilters[] = 'All data mode';
-} else {
-    if ($search !== '') $activeFilters[] = 'Search: ' . $search;
-    if ($roleFilter !== '') $activeFilters[] = 'Role: ' . $roleFilter;
-    if ($statusFilter !== '') $activeFilters[] = 'Status: ' . $statusFilter;
-    if ($barangayFilter !== '') $activeFilters[] = 'Barangay: ' . $barangayFilter;
-}
-$activeFilters[] = 'Sort: ' . $sort;
-$filterText = implode(' | ', $activeFilters);
-
 $allRows = [];
 $allRes = $conn->query($queryBase . " ORDER BY {$orderBy}");
 if ($allRes) {
@@ -138,6 +175,20 @@ if ($allRes) {
     }
 }
 
+if ($selectedUsers) {
+    $applied[] = 'Selected users: ' . (implode(', ', array_map(static fn($r) => $r['name'] !== '' ? $r['name'] : '#' . $r['user_id'], $allRows)) ?: 'none found');
+}
+$sortLabels = ['newest' => 'newest first', 'oldest' => 'oldest first', 'name_asc' => 'by name, A–Z', 'name_desc' => 'by name, Z–A'];
+// One description of the filters for the page and the PDF.
+$filterText = ($includeAll && !$selectedUsers ? 'All data mode' : ($applied ? implode('; ', $applied) : 'None (all accounts)'))
+    . '. Sorted ' . $sortLabels[$sort] . '.';
+// Kept on every link: the PDF, pagination of ticks, and "Show only these".
+$queryParams = array_filter([
+    'search' => $search, 'role' => $roleFilter, 'status' => $statusFilter, 'period' => $period === 'all' ? '' : $period,
+    'date_from' => $dateFrom, 'date_to' => $dateTo, 'sort' => $sort, 'include_all' => $includeAll ? '1' : '',
+    'users' => implode(',', $selectedUsers),
+], static fn($v) => $v !== '');
+
 if ($download) {
     require_once __DIR__ . '/../config/kp.php';
     require_once __DIR__ . '/../vendor/autoload.php';
@@ -150,9 +201,6 @@ if ($download) {
     $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
     $upper = static fn(string $v): string => mb_strtoupper($v, 'UTF-8');
     $orDash = static fn(string $v): string => $v !== '' ? $v : '—';
-    $roleLabels = ['admin' => 'Administrator', 'barangay' => 'Barangay Official', 'resident' => 'Resident'];
-    $roleLabel = static fn(string $r): string => $roleLabels[strtolower($r)] ?? ucwords($r);
-    $sortLabels = ['newest' => 'newest first', 'oldest' => 'oldest first', 'name_asc' => 'by name, A–Z', 'name_desc' => 'by name, Z–A'];
 
     $seal = static function (string $file): string {
         $path = __DIR__ . '/../images/' . $file;
@@ -161,14 +209,7 @@ if ($download) {
             : '';
     };
 
-    $applied = [];
-    if (!$includeAll) {
-        if ($search !== '') $applied[] = 'Search: ' . $search;
-        if ($roleFilter !== '') $applied[] = 'Role: ' . $roleLabel($roleFilter);
-        if ($statusFilter !== '') $applied[] = 'Status: ' . ucfirst(strtolower($statusFilter));
-    }
-    $filterSummaryText = ($applied ? implode('; ', $applied) : 'None (all accounts)')
-        . '. Sorted ' . ($sortLabels[$sort] ?? 'newest first') . '.';
+    $filterSummaryText = $filterText;
 
     $counts = ['resident' => 0, 'barangay' => 0, 'admin' => 0, 'active' => 0, 'inactive' => 0];
     $htmlRows = '';
@@ -378,15 +419,15 @@ include('../includes/sidebar_admin.php');
             <?php if ($fromReports): ?><input type="hidden" name="from" value="reports"><?php endif; ?>
             <div class="ur-grid">
                 <div class="ur-field">
-                    <label>Search</label>
-                    <input type="text" name="search" value="<?= htmlspecialchars($search) ?>" placeholder="Name or email">
+                    <label for="searchInput">Search</label>
+                    <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($search) ?>" placeholder="Name, email, or username">
                 </div>
                 <div class="ur-field">
                     <label>Role</label>
                     <select name="role">
                         <option value="">All Roles</option>
                         <?php foreach ($roleOptions as $opt): ?>
-                        <option value="<?= htmlspecialchars($opt) ?>" <?= strtolower($roleFilter) === strtolower($opt) ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
+                        <option value="<?= htmlspecialchars($opt) ?>" <?= strtolower($roleFilter) === strtolower($opt) ? 'selected' : '' ?>><?= htmlspecialchars($roleLabel($opt)) ?></option>
                         <?php endforeach; ?>
                     </select>
                 </div>
@@ -398,6 +439,24 @@ include('../includes/sidebar_admin.php');
                         <option value="<?= htmlspecialchars($opt) ?>" <?= strtolower($statusFilter) === strtolower($opt) ? 'selected' : '' ?>><?= htmlspecialchars($opt) ?></option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+                <div class="ur-field">
+                    <label for="periodInput">Registered</label>
+                    <select name="period" id="periodInput">
+                        <option value="all" <?= $period === 'all' ? 'selected' : '' ?>>All Periods</option>
+                        <option value="month" <?= $period === 'month' ? 'selected' : '' ?>>This Month</option>
+                        <option value="quarter" <?= $period === 'quarter' ? 'selected' : '' ?>>This Quarter</option>
+                        <option value="year" <?= $period === 'year' ? 'selected' : '' ?>>This Year</option>
+                        <option value="custom" <?= $period === 'custom' ? 'selected' : '' ?>>Custom Dates</option>
+                    </select>
+                </div>
+                <div class="ur-field ur-date">
+                    <label for="dateFromInput">From</label>
+                    <input type="date" name="date_from" id="dateFromInput" value="<?= htmlspecialchars($dateFrom) ?>">
+                </div>
+                <div class="ur-field ur-date">
+                    <label for="dateToInput">To</label>
+                    <input type="date" name="date_to" id="dateToInput" value="<?= htmlspecialchars($dateTo) ?>">
                 </div>
                 <div class="ur-field">
                     <label>Sort</label>
@@ -415,36 +474,30 @@ include('../includes/sidebar_admin.php');
             <div class="ur-actions">
                 <button type="submit" class="ur-btn apply"><i class="uil uil-filter"></i> Apply</button>
                 <a href="users_report.php<?= $fromReports ? '?from=reports' : '' ?>" class="ur-btn reset"><i class="uil uil-redo"></i> Reset</a>
-                <a href="users_report.php?<?= htmlspecialchars(http_build_query([
-                    'search' => $search,
-                    'role' => $roleFilter,
-                    'status' => $statusFilter,
-                    'barangay' => $barangayFilter,
-                    'sort' => $sort,
-                    'include_all' => $includeAll ? '1' : '0',
-                    'download' => 'pdf',
-                ])) ?>" class="ur-btn download"><i class="uil uil-file-download"></i> Download PDF </a>
+                <a href="users_report.php?<?= htmlspecialchars(http_build_query($queryParams + ['download' => 'pdf'])) ?>" class="ur-btn download"><i class="uil uil-file-download"></i> Download PDF</a>
             </div>
         </form>
     </div>
 
     <div class="ur-card">
-        <div class="ur-meta"><strong>Applied Filters:</strong> <?= htmlspecialchars($filterText) ?></div>
+        <div class="ur-meta"><strong>Applied Filters:</strong> <?= htmlspecialchars($filterText) ?>
+            <?php if ($selectedUsers): ?> <span class="ur-hint">(the other filters are not used)</span> <a href="users_report.php<?= $fromReports ? '?from=reports' : '' ?>" class="ur-clear"><i class="uil uil-times"></i> Clear</a><?php endif; ?>
+        </div>
         <div class="ur-meta"><strong>Total Records in Download:</strong> <?= (int)count($allRows) ?></div>
 
         <div class="ur-table-wrap">
             <table class="ur-table">
                 <thead>
-                    <tr><th>User ID</th><th>Name</th><th>Email</th><th>Role</th><th>Barangay</th><th>Age</th><th>Status</th></tr>
+                    <tr><th class="gb-sel-col"><input type="checkbox" class="gb-sel-all" aria-label="Select all users shown" title="Select all shown"></th><th>Name</th><th>Email</th><th>Role</th><th>Barangay</th><th>Age</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($previewRows): ?>
                         <?php foreach ($previewRows as $r): ?>
                         <tr>
-                            <td><?= htmlspecialchars($r['user_id'] !== '' ? $r['user_id'] : 'N/A') ?></td>
+                            <td class="gb-sel-col"><input type="checkbox" class="gb-sel" value="<?= (int)$r['user_id'] ?>" data-code="<?= htmlspecialchars($r['name'] !== '' ? $r['name'] : '#' . $r['user_id']) ?>" aria-label="Select <?= htmlspecialchars($r['name']) ?>"></td>
                             <td><?= htmlspecialchars($r['name'] !== '' ? $r['name'] : 'N/A') ?></td>
                             <td><?= htmlspecialchars($r['email'] !== '' ? $r['email'] : 'N/A') ?></td>
-                            <td><?= htmlspecialchars($r['role'] !== '' ? $r['role'] : 'N/A') ?></td>
+                            <td><?= htmlspecialchars($r['role'] !== '' ? $roleLabel($r['role']) : 'N/A') ?></td>
                             <td><?= htmlspecialchars($r['barangay'] !== '' ? $r['barangay'] : 'N/A') ?></td>
                             <td><?= htmlspecialchars($r['age'] !== '' ? $r['age'] : 'N/A') ?></td>
                             <td><?= htmlspecialchars($r['status'] !== '' ? $r['status'] : 'N/A') ?></td>
@@ -459,9 +512,27 @@ include('../includes/sidebar_admin.php');
         <?php if (count($allRows) > 50): ?>
         <div class="ur-note">Preview shows first 50 rows only. Download includes all <?= (int)count($allRows) ?> rows.</div>
         <?php endif; ?>
+        <?php gabaybatas_case_selection_bar('users_report.php?download=pdf', 'users_report.php' . ($fromReports ? '?from=reports' : ''), 'users'); ?>
     </div>
 </div>
 </div>
+
+<script>
+(function () {
+    // The date range applies only to "Custom Dates" (same as the Case Report).
+    const period = document.getElementById('periodInput');
+    const dates = [document.getElementById('dateFromInput'), document.getElementById('dateToInput')];
+    function syncDates() {
+        const custom = period.value === 'custom';
+        dates.forEach(function (input) {
+            input.disabled = !custom;
+            input.closest('.ur-field').classList.toggle('is-disabled', !custom);
+        });
+    }
+    period.addEventListener('change', syncDates);
+    syncDates();
+})();
+</script>
 
 <style>
 .ur-body{padding:24px 28px 40px;}
@@ -474,7 +545,10 @@ include('../includes/sidebar_admin.php');
 .ur-field{display:flex;flex-direction:column;gap:6px;}
 .ur-field label{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#6b7280;}
 .ur-field input,.ur-field select{width:100%;height:36px;border:1px solid #d1d5db;border-radius:8px;padding:0 10px;font-size:12.5px;color:#111827;background:#fff;}
-.ur-check{justify-content:flex-end;}
+.ur-check{grid-column:1/-1;justify-content:flex-end;}
+.ur-field.is-disabled{opacity:.45;}
+.ur-hint{font-weight:500;color:#6b7280;margin-left:4px;}
+.ur-clear{display:inline-flex;align-items:center;gap:3px;margin-left:6px;color:#b91c1c;font-weight:700;text-decoration:none;}
 .ur-check-label{display:flex;align-items:center;gap:7px;font-size:12.5px;color:#111827;text-transform:none!important;letter-spacing:0!important;font-weight:600!important;}
 .ur-check-label input[type="checkbox"]{width:13px;height:13px;accent-color:#1d4ed8;}
 .ur-actions{display:flex;flex-wrap:wrap;gap:8px;}

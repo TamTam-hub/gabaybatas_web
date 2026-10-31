@@ -320,6 +320,26 @@ document.querySelectorAll('.rv-review-close').forEach(button => {
     button.addEventListener('click', () => button.closest('details').removeAttribute('open'));
 });
 
+// The queue tabs, search and review forms reload the page; keep the reader where they were.
+{
+    const scrollKey = 'rvQueueScroll';
+    const rememberScroll = () => {
+        try { sessionStorage.setItem(scrollKey, String(window.scrollY)); } catch (e) {}
+    };
+    document.querySelectorAll('.rv-panel a[href^="?"]').forEach(link => link.addEventListener('click', rememberScroll));
+    document.querySelectorAll('.rv-panel form, .rv-delete-confirm-form').forEach(form => form.addEventListener('submit', rememberScroll));
+    let savedScroll = null;
+    try {
+        savedScroll = sessionStorage.getItem(scrollKey);
+        sessionStorage.removeItem(scrollKey);
+    } catch (e) {}
+    if (savedScroll !== null) {
+        if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+        window.scrollTo(0, Number(savedScroll) || 0);
+        requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
+    }
+}
+
 const rvDeleteModal = document.getElementById('rvDeleteModal');
 const rvDeleteId = document.getElementById('rvDeleteId');
 const rvDeleteName = document.getElementById('rvDeleteName');

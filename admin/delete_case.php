@@ -8,6 +8,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 
 require_once '../config/database.php';
 require_once '../config/archive.php';
+require_once '../config/kp.php';
 gabaybatas_archive_ensure_schema($conn);
 
 $caseIdParam = trim((string)($_GET['id'] ?? $_POST['id'] ?? ''));
@@ -46,6 +47,7 @@ if ($caseIdParam === '') {
     if ($typeColumn)     { $selectFields[] = "$typeColumn AS case_type"; }
     if ($statusColumn)   { $selectFields[] = "$statusColumn AS case_status"; }
     if ($barangayColumn) { $selectFields[] = "$barangayColumn AS case_barangay"; }
+    if ($hasColumn('kp_status')) { $selectFields[] = "kp_status AS case_kp_status"; }
 
     $sql = "SELECT " . implode(', ', $selectFields) . " FROM cases WHERE $idColumn = ? LIMIT 1";
     $stmt = $conn->prepare($sql);
@@ -102,7 +104,7 @@ if ($caseIdParam === '') {
 <div class="main">
     <div class="topbar">
         <div class="topbar-left">
-            <div class="topbar-title">Delete Case</div>
+            <div class="topbar-title">Archive Case</div>
             <span class="topbar-badge">Admin</span>
         </div>
         <div class="topbar-right">
@@ -136,14 +138,15 @@ if ($caseIdParam === '') {
                     <div class="dc-warning-icon"><i class="uil uil-exclamation-triangle"></i></div>
                     <div>
                         <div class="dc-warning-title">Confirm case archiving</div>
-                        <div class="dc-warning-text">Case ID C-<?= htmlspecialchars((string)($case['display_case_id'] ?? $caseIdParam)) ?> will be hidden from active records. Its case history and evidence will be preserved.</div>
+                        <div class="dc-warning-text">Case <?= htmlspecialchars((string)($case['display_case_id'] ?? $caseIdParam)) ?> will be hidden from active records. Its case history and evidence will be preserved.</div>
                     </div>
                 </div>
 
                 <div class="dc-grid">
                     <div class="dc-item"><span>Resident</span><strong><?= htmlspecialchars((string)($case['resident_name'] ?? 'N/A')) ?></strong></div>
                     <div class="dc-item"><span>Case Type</span><strong><?= htmlspecialchars((string)($case['case_type'] ?? 'N/A')) ?></strong></div>
-                    <div class="dc-item"><span>Status</span><strong><?= htmlspecialchars((string)($case['case_status'] ?? 'N/A')) ?></strong></div>
+                    <?php $dcKp = trim((string)($case['case_kp_status'] ?? '')); ?>
+                    <div class="dc-item"><span>Status</span><strong<?= $dcKp !== '' ? ' style="color:' . htmlspecialchars(kp_status_color($dcKp)) . '"' : '' ?>><?= htmlspecialchars($dcKp !== '' ? kp_status_label($dcKp) : (string)($case['case_status'] ?? 'N/A')) ?></strong></div>
                     <div class="dc-item"><span>Barangay</span><strong><?= htmlspecialchars((string)($case['case_barangay'] ?? 'N/A')) ?></strong></div>
                 </div>
 

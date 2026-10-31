@@ -445,7 +445,7 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                     $email  = htmlspecialchars((string)($row['display_email']    ?? 'N/A'));
                     $rawRole = strtolower(trim((string)($row['display_role'] ?? '')));
                     $roleLabel = $rawRole !== '' ? $rawRole : 'resident';
-                    $role   = htmlspecialchars($roleLabel);
+                    $role   = htmlspecialchars(['admin' => 'Administrator', 'barangay' => 'Barangay Official', 'resident' => 'Resident'][$roleLabel] ?? ucwords($roleLabel));
                     $brgy   = htmlspecialchars((string)($row['display_barangay'] ?? 'N/A'));
                     $age    = htmlspecialchars((string)($row['display_age'] ?? 'N/A'));
                     $status = trim((string)($row['display_status'] ?? ''));
@@ -468,7 +468,7 @@ $users = $conn->query($queryBase . " ORDER BY {$orderBy} LIMIT {$offset}, {$perP
                     </td>
                     <td class="um-cell-muted"><?= $email ?></td>
                     <td>
-                        <span class="um-role-badge"><?= $role ?></span>
+                        <span class="um-role-badge <?= htmlspecialchars($roleLabel) ?>"><?= $role ?></span>
                     </td>
                     <td class="um-cell-muted"><?= $brgy ?></td>
                     <td class="um-cell-muted"><?= $age ?></td>

@@ -2,6 +2,7 @@
 session_start();
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/barangays.php';
+require_once __DIR__ . '/includes/brand_mark.php';
 $error = '';
 if (isset($_SESSION['role'])) {
     if ($_SESSION['role'] === 'admin')    { header('Location: admin/dashboard.php'); exit(); }
@@ -58,6 +59,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GabayBatas — Sign In</title>
+<?= gabaybatas_favicon_links() ?>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:wght@400;600;700&family=Source+Sans+3:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link href="https://unicons.iconscout.com/release/v4.0.8/css/line.css" rel="stylesheet">
 <style>
@@ -215,7 +217,7 @@ body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; backgr
 
     <section class="panel">
         <div class="app-mark">
-            <i class="uil uil-shield-check"></i>
+            <i class="gb-mark"><?= gabaybatas_brand_mark() ?></i>
             <span><b>GabayBatas</b><small>Legal Information &amp; Referral System</small></span>
         </div>
 
@@ -262,6 +264,7 @@ body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; backgr
 <div class="page-foot">&copy; <?= date('Y') ?> GabayBatas &middot; Barangay Muñoz, City of Catbalogan, Samar</div>
 
 <script src="assets/vendor/lottie/lottie_light.min.js"></script>
+<script src="assets/js/placeholder-marquee.js" defer></script>
 <script>
 // Show or hide the password
 document.getElementById('togglePw').addEventListener('click', function () {

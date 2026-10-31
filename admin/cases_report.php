@@ -8,6 +8,7 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
 require_once '../config/database.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
 require_once __DIR__ . '/../includes/flexible_report.php';
+require_once __DIR__ . '/../includes/case_selection.php';
 
 // Same filters, rows and formal PDF as the barangay Flexible Reports
 // (includes/flexible_report.php, barangay/generate_report.php); laid out like the User Report.
@@ -26,6 +27,8 @@ foreach (kp_statuses() as $key => $info) {
 $formParams = gabaybatas_flex_params($_GET);
 $filterText = $includeAll ? 'All data mode' : ($report['applied'] ? implode(' | ', $report['applied']) : 'None (all non-archived cases)');
 $downloadUrl = '../barangay/generate_report.php?' . http_build_query(array_filter($params, static fn($v) => $v !== ''));
+// Selected cases are shown back in the Search box as case numbers (ids are kept in the params as cases).
+$caseCodes = $formParams['cases'] === '' ? '' : implode(', ', array_map(static fn($id) => 'C-' . str_pad($id, 4, '0', STR_PAD_LEFT), explode(',', $formParams['cases'])));
 
 include('../includes/header_admin.php');
 include('../includes/sidebar_admin.php');
@@ -61,7 +64,7 @@ include('../includes/sidebar_admin.php');
             <div class="ur-grid">
                 <div class="ur-field">
                     <label for="searchInput">Search</label>
-                    <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($formParams['search']) ?>" placeholder="Case no., complainant, respondent">
+                    <input type="text" name="search" id="searchInput" value="<?= htmlspecialchars($caseCodes !== '' ? $caseCodes : $formParams['search']) ?>" placeholder="Case no., name, or several: C-0037, C-0055" title="Type a case number or name. To list specific cases, type several case numbers separated by commas.">
                 </div>
                 <div class="ur-field">
                     <label for="statusInput">Status</label>
@@ -121,19 +124,23 @@ include('../includes/sidebar_admin.php');
     </div>
 
     <div class="ur-card">
-        <div class="ur-meta"><strong>Applied Filters:</strong> <?= htmlspecialchars($filterText) ?></div>
+        <div class="ur-meta"><strong>Applied Filters:</strong> <?= htmlspecialchars($filterText) ?>
+            <?php if ($params['cases'] !== ''): ?> <span class="ur-hint">(the other filters are not used)</span> <a href="cases_report.php<?= $fromReports ? '?from=reports' : '' ?>" class="ur-clear"><i class="uil uil-times"></i> Clear</a><?php endif; ?>
+        </div>
         <div class="ur-meta"><strong>Total Records in Download:</strong> <?= (int)$report['total'] ?></div>
 
         <div class="ur-table-wrap">
             <table class="ur-table">
                 <thead>
-                    <tr><th>Case No.</th><th>Complainant</th><th>Respondent</th><th>Case Type</th><th>Status</th><th>Date Filed</th></tr>
+                    <tr><th class="gb-sel-col"><input type="checkbox" class="gb-sel-all" aria-label="Select all cases shown" title="Select all shown"></th><th>Case No.</th><th>Complainant</th><th>Respondent</th><th>Case Type</th><th>Status</th><th>Date Filed</th></tr>
                 </thead>
                 <tbody>
                     <?php if ($report['rows']): ?>
                         <?php foreach ($report['rows'] as $row): $dateTs = strtotime((string)$row['date_submitted']); ?>
+                        <?php $rowCode = gabaybatas_format_case_id($row['case_id'] ?? '', $row['id'] ?? ''); ?>
                         <tr>
-                            <td><?= htmlspecialchars(gabaybatas_format_case_id($row['case_id'] ?? '', $row['id'] ?? '')) ?></td>
+                            <td class="gb-sel-col"><input type="checkbox" class="gb-sel" value="<?= (int)$row['id'] ?>" data-code="<?= htmlspecialchars($rowCode) ?>" aria-label="Select <?= htmlspecialchars($rowCode) ?>"></td>
+                            <td><?= htmlspecialchars($rowCode) ?></td>
                             <td><?= htmlspecialchars((string)($row['name'] ?: '—')) ?></td>
                             <td><?= htmlspecialchars((string)($row['complained_person'] ?: '—')) ?></td>
                             <td><?= htmlspecialchars((string)($row['case_type'] ?: '—')) ?></td>
@@ -142,7 +149,7 @@ include('../includes/sidebar_admin.php');
                         </tr>
                         <?php endforeach; ?>
                     <?php else: ?>
-                    <tr><td colspan="6" class="ur-empty">No records matched the selected filters.</td></tr>
+                    <tr><td colspan="7" class="ur-empty">No records matched the selected filters.</td></tr>
                     <?php endif; ?>
                 </tbody>
             </table>
@@ -150,6 +157,7 @@ include('../includes/sidebar_admin.php');
         <?php if ($report['total'] > 50): ?>
         <div class="ur-note">Preview shows first 50 rows only. Download includes all <?= (int)$report['total'] ?> rows.</div>
         <?php endif; ?>
+        <?php gabaybatas_case_selection_bar('../barangay/generate_report.php', 'cases_report.php' . ($fromReports ? '?from=reports' : '')); ?>
     </div>
 </div>
 </div>
@@ -185,6 +193,8 @@ include('../includes/sidebar_admin.php');
 .ur-field label{font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#6b7280;}
 .ur-field input,.ur-field select{width:100%;height:36px;border:1px solid #d1d5db;border-radius:8px;padding:0 10px;font-size:12.5px;color:#111827;background:#fff;box-sizing:border-box;font-family:inherit;}
 .ur-check{grid-column:1/-1;}
+.ur-hint{font-weight:500;text-transform:none;letter-spacing:0;color:#6b7280;margin-left:4px;}
+.ur-clear{display:inline-flex;align-items:center;gap:3px;margin-left:6px;color:#b91c1c;font-weight:700;text-decoration:none;}
 .ur-check-label{display:flex;align-items:center;gap:7px;font-size:12.5px;color:#111827;text-transform:none!important;letter-spacing:0!important;font-weight:600!important;}
 .ur-check-label input[type="checkbox"]{width:13px;height:13px;accent-color:#1d4ed8;}
 .ur-actions{display:flex;flex-wrap:wrap;gap:8px;}

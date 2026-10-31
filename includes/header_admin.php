@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GabayBatas — Admin Portal</title>
+    <?php require_once __DIR__ . '/brand_mark.php'; echo gabaybatas_favicon_links('../'); ?>
     <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,wght@0,500;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://unicons.iconscout.com/release/v4.0.8/css/line.css" rel="stylesheet">
     <style>
@@ -625,9 +626,354 @@
             .main { margin-left: 0; }
             .sidebar { transform: translateX(-100%); }
         }
+
+        /* ═══ UI refresh (admin pages) ════════════════════════════════════════
+           Same navy government theme as the login page and the barangay portal:
+           navy sidebar with a white pill for the current page, flag strip on the top
+           bar, plain light background, clearer text and visible focus rings.
+           Scoped to body.gb-admin-ui; information and flow are unchanged. */
+        :root {
+            --accent:       #1a3a6b;
+            --accent-light: #eef3fb;
+            --accent-glow:  rgba(26,58,107,.16);
+            --page-bg:      #eef2f8;
+            --border:       #dde4ef;
+            --text-main:    #14213a;
+            --text-sub:     #4f5f75;
+        }
+        body.gb-admin-ui { background: #eef2f8; background-image: none; font-size: 14.5px; -webkit-font-smoothing: antialiased; }
+        body.gb-admin-ui::before { display: none; }
+
+        /* Sidebar */
+        .gb-admin-ui .sidebar {
+            background: radial-gradient(circle at 0% 0%, rgba(255,255,255,.08), transparent 45%), linear-gradient(175deg, #1a3a6b 0%, #0e2242 70%, #0b1a33 100%);
+            border-right: 0; box-shadow: 4px 0 24px rgba(11,26,51,.12);
+        }
+        .gb-admin-ui .sidebar-brand { padding: 22px 20px 18px; border-bottom-color: rgba(255,255,255,.08); }
+        .gb-admin-ui .brand-icon { width: 40px; height: 40px; border-radius: 11px; font-size: 20px; background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.12); box-shadow: none; }
+        .gb-admin-ui .brand-title { font-size: 19px; }
+        .gb-admin-ui .brand-logo-row { margin-bottom: 0; }
+        .gb-admin-ui .brand-title { line-height: 1.2; }
+        .gb-admin-ui .brand-sub { margin: 4px 0 0; color: rgba(255,255,255,.62); font-size: 10.5px; }
+        .gb-admin-ui .nav-label { color: rgba(255,255,255,.45); font-weight: 700; letter-spacing: 1.6px; padding: 18px 14px 8px; }
+        .gb-admin-ui .sidebar nav { padding: 4px 12px; }
+        .gb-admin-ui .sidebar nav a { padding: 11px 14px; margin-bottom: 3px; border-radius: 10px; font-size: 14px; color: rgba(255,255,255,.82); border: 1px solid transparent; }
+        .gb-admin-ui .sidebar nav a i { font-size: 18px; }
+        .gb-admin-ui .sidebar nav a:hover { background: rgba(255,255,255,.09); color: #fff; transform: none; }
+        .gb-admin-ui .sidebar nav a.active { background: #fff; color: #0e2242; font-weight: 700; border-color: transparent; box-shadow: 0 6px 16px rgba(0,0,0,.18); }
+        .gb-admin-ui .sidebar nav a.active i { color: #1a3a6b; }
+        .gb-admin-ui .sidebar-footer { padding: 12px; border-top-color: rgba(255,255,255,.08); }
+
+        /* Top bar: flag strip and a plain navy serif title */
+        .gb-admin-ui .topbar { background: rgba(255,255,255,.96); box-shadow: 0 1px 0 rgba(15,23,42,.02); border-bottom-color: var(--border); padding: 0 32px; }
+        .gb-admin-ui .topbar::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #1a3a6b 0 33%, #b91c1c 33% 66%, #c9a227 66%); }
+        .gb-admin-ui .topbar-title { font-size: 23px; color: #0b1a33; letter-spacing: 0; }
+        .gb-admin-ui .topbar-badge { color: #1a3a6b; background: #eef3fb; border-color: #d6e2f5; }
+        .gb-admin-ui .notif-btn { width: 38px; height: 38px; border-radius: 10px; }
+        .gb-admin-ui .notif-btn:hover { background: #eef3fb; color: #1a3a6b; border-color: #c9d6ea; }
+        .gb-admin-ui .user-avatar { background: linear-gradient(135deg, #24508f, #0e2242); }
+        .gb-admin-ui .user-text strong { font-size: 13.5px; }
+        .gb-admin-ui .user-text span { font-size: 12px; color: #6f7f96; }
+
+        /* Keyboard focus is always visible */
+        .gb-admin-ui a:focus-visible, .gb-admin-ui button:focus-visible, .gb-admin-ui input:focus-visible,
+        .gb-admin-ui select:focus-visible, .gb-admin-ui textarea:focus-visible, .gb-admin-ui summary:focus-visible {
+            outline: 3px solid rgba(36,80,143,.4); outline-offset: 2px;
+        }
+        .gb-admin-ui .sidebar a:focus-visible { outline-color: rgba(255,255,255,.6); }
+
+        /* Admin forms (Add / Edit / Archive User) and report builders (User Report, Case Report):
+           sentence-case labels, taller inputs with a navy focus ring, navy buttons. */
+        .gb-admin-ui .au-body, .gb-admin-ui .eu-body, .gb-admin-ui .du-body, .gb-admin-ui .ur-body { padding: 26px 32px 44px; }
+        .gb-admin-ui .au-sub, .gb-admin-ui .eu-sub, .gb-admin-ui .du-sub, .gb-admin-ui .ur-sub { font-size: 13.5px; color: #4f5f75; }
+        .gb-admin-ui .au-back-btn, .gb-admin-ui .eu-back-btn, .gb-admin-ui .du-back-btn, .gb-admin-ui .ur-back {
+            color: #1a3a6b; background: #eef3fb; border: 1px solid #d6e2f5; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 600; text-decoration: none;
+        }
+        .gb-admin-ui .au-back-btn:hover, .gb-admin-ui .eu-back-btn:hover, .gb-admin-ui .du-back-btn:hover, .gb-admin-ui .ur-back:hover { background: #dfe8f7; }
+        .gb-admin-ui .au-card, .gb-admin-ui .eu-card, .gb-admin-ui .du-card, .gb-admin-ui .ur-card {
+            border-radius: 14px; border-color: #e1e7f0; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045);
+        }
+        .gb-admin-ui .au-card, .gb-admin-ui .eu-card, .gb-admin-ui .du-card { padding: 22px 24px; }
+        .gb-admin-ui .au-field label, .gb-admin-ui .eu-field label, .gb-admin-ui .du-label, .gb-admin-ui .ur-field label {
+            font-size: 13px; font-weight: 700; text-transform: none; letter-spacing: .1px; color: #334155;
+        }
+        .gb-admin-ui .au-field input, .gb-admin-ui .au-field select, .gb-admin-ui .eu-field input, .gb-admin-ui .eu-field select,
+        .gb-admin-ui .du-reason, .gb-admin-ui .ur-field input, .gb-admin-ui .ur-field select {
+            min-height: 44px; font-size: 14.5px; color: #14213a; background: #fff; border: 1.5px solid #d6deea; border-radius: 10px; font-family: inherit;
+        }
+        .gb-admin-ui .ur-field input, .gb-admin-ui .ur-field select { min-height: 42px; height: auto; font-size: 14px; }
+        .gb-admin-ui .ur-field input[type="checkbox"] { min-height: 0; }
+        .gb-admin-ui .au-field input:focus, .gb-admin-ui .au-field select:focus, .gb-admin-ui .eu-field input:focus, .gb-admin-ui .eu-field select:focus,
+        .gb-admin-ui .du-reason:focus, .gb-admin-ui .ur-field input:focus, .gb-admin-ui .ur-field select:focus {
+            outline: none; border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12);
+        }
+        .gb-admin-ui .au-submit, .gb-admin-ui .eu-submit, .gb-admin-ui .ur-btn.apply {
+            background: linear-gradient(135deg, #24508f, #0e2242); border-color: transparent; color: #fff; border-radius: 10px; font-weight: 700; box-shadow: 0 6px 14px rgba(26,58,107,.2);
+        }
+        .gb-admin-ui .au-submit:hover, .gb-admin-ui .eu-submit:hover, .gb-admin-ui .ur-btn.apply:hover { filter: brightness(1.08); }
+        .gb-admin-ui .au-cancel, .gb-admin-ui .eu-cancel, .gb-admin-ui .du-cancel { border: 1.5px solid #d6deea; border-radius: 10px; color: #334155; font-weight: 700; }
+        .gb-admin-ui .du-delete { border-radius: 10px; font-weight: 700; }
+        .gb-admin-ui .au-submit, .gb-admin-ui .eu-submit, .gb-admin-ui .au-cancel, .gb-admin-ui .eu-cancel, .gb-admin-ui .du-cancel, .gb-admin-ui .du-delete { padding: 11px 18px; font-size: 14px; }
+        .gb-admin-ui .eu-account-meta span, .gb-admin-ui .du-info-item .du-label { font-size: 12px; color: #6f7f96; }
+        .gb-admin-ui .eu-account-meta strong, .gb-admin-ui .du-value { font-size: 14.5px; color: #14213a; }
+        .gb-admin-ui .du-warning { border-radius: 12px; }
+
+        /* Report builders */
+        .gb-admin-ui .ur-btn { min-height: 42px; padding: 10px 15px; font-size: 13.5px; font-weight: 700; border-radius: 10px; border: 1.5px solid #d6deea; }
+        .gb-admin-ui .ur-btn.download { background: #fff; color: #1a3a6b; border-color: #c9d6ea; }
+        .gb-admin-ui .ur-btn.download:hover { background: #f6f9ff; border-color: #1a3a6b; }
+        .gb-admin-ui .ur-check-label { font-size: 13.5px !important; }
+        .gb-admin-ui .ur-check-label input[type="checkbox"] { width: 16px; height: 16px; accent-color: #1a3a6b; }
+        .gb-admin-ui .ur-meta { font-size: 13.5px; color: #334155; }
+        .gb-admin-ui .ur-table th, .gb-admin-ui .ur-table td { border-color: #e1e7f0; padding: 11px 12px; font-size: 13.5px; }
+        .gb-admin-ui .ur-table th { background: #f5f7fb; color: #334155; }
+        .gb-admin-ui .ur-table tbody tr:hover td { background: #f6f9ff; }
+
+        /* Manage Users: navy buttons, left-aligned table, softer badges */
+        .gb-admin-ui .um-body { padding: 26px 32px 44px; }
+        .gb-admin-ui .um-sub { font-size: 14.5px; color: #14213a; }
+        .gb-admin-ui .um-add-btn { background: linear-gradient(135deg, #24508f, #0e2242); border-radius: 10px; padding: 11px 18px; font-size: 13.5px; font-weight: 700; box-shadow: 0 6px 14px rgba(26,58,107,.2); }
+        .gb-admin-ui .um-add-btn:hover { background: linear-gradient(135deg, #24508f, #0e2242); filter: brightness(1.08); }
+        .gb-admin-ui .um-btn-ghost { text-decoration: none; color: #1a3a6b; border: 1.5px solid #c9d6ea; border-radius: 10px; min-height: 38px; font-size: 13px; font-weight: 700; }
+        .gb-admin-ui .um-btn-ghost:hover { background: #f6f9ff; border-color: #1a3a6b; color: #1a3a6b; }
+        .gb-admin-ui .um-stat, .gb-admin-ui .um-card { border-color: #e1e7f0; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045); }
+        .gb-admin-ui .um-stat-num { font-size: 24px; color: #0b1a33; }
+        .gb-admin-ui .um-stat-label { font-size: 12.5px; color: #4f5f75; }
+        .gb-admin-ui .um-toolbar { border-bottom-color: #e1e7f0; }
+        .gb-admin-ui .um-search-input { min-height: 40px; font-size: 13.5px; border: 1.5px solid #d6deea; border-radius: 10px; background: #fff; }
+        .gb-admin-ui .um-select { height: 40px; font-size: 13px; border: 1.5px solid #d6deea; border-radius: 10px; color: #14213a; }
+        .gb-admin-ui .um-search-input:focus, .gb-admin-ui .um-select:focus { border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+        .gb-admin-ui .um-table { font-size: 13.5px; }
+        .gb-admin-ui .um-table th { text-align: left; font-size: 11.5px; color: #4f5f75; font-weight: 700; background: #f5f7fb; border-bottom-color: #e1e7f0; }
+        .gb-admin-ui .um-table td { text-align: left; border-bottom-color: #eef2f7; }
+        .gb-admin-ui .um-table tbody tr:hover td { background: #f6f9ff; }
+        .gb-admin-ui .um-user-cell { justify-content: flex-start; }
+        .gb-admin-ui .um-name { font-size: 14px; color: #14213a; }
+        .gb-admin-ui .um-email-sm, .gb-admin-ui .um-cell-muted { font-size: 12.5px; color: #4f5f75; }
+        .gb-admin-ui .um-role-badge { font-size: 12px; font-weight: 700; padding: 4px 11px; background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .um-role-badge.admin { background: #fdf6e3; color: #8a6d12; }
+        .gb-admin-ui .um-role-badge.barangay { background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .um-role-badge.resident { background: #f1f5f9; color: #334155; }
+        .gb-admin-ui .um-status-badge { font-size: 12px; font-weight: 700; padding: 4px 11px; }
+        .gb-admin-ui .um-action-btn { width: 34px; height: 34px; border-radius: 9px; font-size: 16px; }
+        .gb-admin-ui .um-action-btn.edit { background: #eef3fb; color: #1a3a6b; border-color: #d6e2f5; }
+        .gb-admin-ui .um-action-btn.edit:hover { background: #dfe8f7; }
+        .gb-admin-ui .um-footer { border-top-color: #e1e7f0; background: #fafbfd; }
+        .gb-admin-ui .um-page-meta, .gb-admin-ui .um-page-current { font-size: 13px; }
+        .gb-admin-ui .um-page-btn { border: 1.5px solid #d6deea; border-radius: 9px; padding: 7px 13px; font-size: 13px; color: #1a3a6b; }
+        .gb-admin-ui .um-page-btn:hover { border-color: #1a3a6b; color: #1a3a6b; background: #f6f9ff; }
+
+        /* Manage Cases: navy tabs and buttons, clearer table text */
+        .gb-admin-ui .ac-sub { font-size: 14.5px; color: #14213a; }
+        .gb-admin-ui .ac-tab { border: 1.5px solid #e1e7f0; border-radius: 10px; color: #334155; font-size: 13.5px; }
+        .gb-admin-ui .ac-tab:hover { border-color: #c9d6ea; background: #f6f9ff; color: #14213a; }
+        .gb-admin-ui .ac-tab.active { background: linear-gradient(135deg, #24508f, #0e2242); border-color: transparent; color: #fff; box-shadow: 0 6px 14px rgba(26,58,107,.22); }
+        .gb-admin-ui .ac-tab:not(.active) .ac-tab-count { background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .ac-card { border-color: #e1e7f0; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045); }
+        .gb-admin-ui .ac-toolbar { border-bottom-color: #e1e7f0; }
+        .gb-admin-ui .ac-search-form { flex: 1 1 auto; min-width: 200px; }
+        .gb-admin-ui .ac-filter-form { flex: 0 0 auto; }
+        .gb-admin-ui .ac-search-input { min-height: 42px; border: 1.5px solid #d6deea; background: #fff; font-size: 14px; }
+        .gb-admin-ui .ac-search-input::placeholder { color: #8a99ad; }
+        .gb-admin-ui .ac-select { height: 42px; border: 1.5px solid #d6deea; color: #14213a; font-size: 13.5px; }
+        .gb-admin-ui .ac-search-input:focus, .gb-admin-ui .ac-select:focus { border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+        .gb-admin-ui .ac-btn-ghost { min-height: 42px; color: #1a3a6b; border: 1.5px solid #c9d6ea; font-weight: 700; }
+        .gb-admin-ui .ac-btn-ghost:hover { background: #f6f9ff; border-color: #1a3a6b; color: #1a3a6b; }
+        .gb-admin-ui .ac-table { font-size: 13.5px; }
+        .gb-admin-ui .ac-table th { color: #4f5f75; background: #f5f7fb; border-bottom: 1px solid #e1e7f0; }
+        .gb-admin-ui .ac-table td { border-bottom-color: #eef2f7; color: #14213a; }
+        .gb-admin-ui .ac-table tbody tr:hover td { background: #f6f9ff; }
+        .gb-admin-ui .ac-case-id { font-size: 12.5px; background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .ac-avatar { background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .ac-muted, .gb-admin-ui .ac-date small { color: #4f5f75; }
+        .gb-admin-ui .ac-date strong { font-size: 13px; color: #14213a; }
+        .gb-admin-ui .ac-badge { font-size: 12.5px; }
+        .gb-admin-ui .ac-menu-btn { border: 1.5px solid #d6deea; border-radius: 9px; color: #1a3a6b; }
+        .gb-admin-ui .ac-menu-btn:hover { border-color: #1a3a6b; background: #f6f9ff; color: #1a3a6b; }
+        .gb-admin-ui .ac-dropdown { border-color: #e1e7f0; border-radius: 12px; box-shadow: 0 12px 28px rgba(15,23,42,.14); }
+        .gb-admin-ui .ac-dropdown-item { font-size: 13.5px; color: #14213a; }
+        .gb-admin-ui .ac-dropdown-item:hover { background: #f6f9ff; color: #1a3a6b; }
+        .gb-admin-ui .ac-dropdown-item.ac-delete { color: #b91c1c; }
+        .gb-admin-ui .ac-dropdown-item.ac-delete:hover { background: #fef2f2; color: #991b1b; }
+        .gb-admin-ui .ac-view-btn { color: #1a3a6b; background: #eef3fb; border-color: #d6e2f5; }
+        .gb-admin-ui .ac-edit-btn { color: #1a3a6b; background: #fff; border-color: #c9d6ea; }
+        .gb-admin-ui .ac-view-btn:hover, .gb-admin-ui .ac-edit-btn:hover { background: #dfe8f7; color: #0e2242; }
+        .gb-admin-ui .ac-footer { border-top-color: #e1e7f0; background: #fafbfd; }
+        .gb-admin-ui .ac-page-btn { border: 1.5px solid #d6deea; color: #1a3a6b; }
+        .gb-admin-ui .ac-page-btn:hover:not(.disabled) { border-color: #1a3a6b; color: #1a3a6b; background: #f6f9ff; }
+
+        /* View Case and Archive Case */
+        .gb-admin-ui .cv-body, .gb-admin-ui .dc-body, .gb-admin-ui .acs-body { padding: 26px 32px 44px; }
+        .gb-admin-ui .cv-sub, .gb-admin-ui .dc-sub { font-size: 13.5px; color: #4f5f75; }
+        .gb-admin-ui .cv-back-btn, .gb-admin-ui .dc-back-btn {
+            color: #1a3a6b; background: #eef3fb; border: 1px solid #d6e2f5; border-radius: 10px; padding: 9px 14px; font-size: 13px;
+        }
+        .gb-admin-ui .cv-back-btn:hover, .gb-admin-ui .dc-back-btn:hover { background: #dfe8f7; }
+        .gb-admin-ui .cv-edit-btn { color: #fff; background: linear-gradient(135deg, #24508f, #0e2242); border-color: transparent; border-radius: 10px; padding: 9px 15px; font-size: 13px; font-weight: 700; box-shadow: 0 6px 14px rgba(26,58,107,.2); }
+        .gb-admin-ui .cv-edit-btn:hover { background: linear-gradient(135deg, #24508f, #0e2242); filter: brightness(1.08); }
+        .gb-admin-ui .cv-card, .gb-admin-ui .dc-card {
+            border-color: #e1e7f0; border-radius: 14px; padding: 22px 24px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045);
+        }
+        .gb-admin-ui .cv-grid { gap: 16px; }
+        .gb-admin-ui .cv-item label, .gb-admin-ui .dc-item span {
+            font-size: 13px; text-transform: none; letter-spacing: .1px; color: #334155; font-weight: 700;
+        }
+        .gb-admin-ui .cv-value { font-size: 14.5px; color: #14213a; background: #f8fafd; border-color: #e1e7f0; padding: 11px 13px; }
+        .gb-admin-ui .cv-multiline { line-height: 1.65; }
+        .gb-admin-ui .cv-evidence-heading p { font-size: 12.5px; color: #4f5f75; }
+        .gb-admin-ui .cv-evidence-count, .gb-admin-ui .cv-evidence-view { background: #eef3fb; color: #1a3a6b; font-size: 12px; }
+        .gb-admin-ui .cv-evidence-view:hover { background: #dfe8f7; }
+        .gb-admin-ui .cv-evidence:hover { border-color: #c9d6ea; box-shadow: 0 5px 14px rgba(26,58,107,.08); }
+        .gb-admin-ui .cv-evidence-info strong { font-size: 13px; }
+        .gb-admin-ui .cv-evidence-info small { font-size: 11.5px; }
+        .gb-admin-ui .cv-badge { font-size: 12.5px; }
+        .gb-admin-ui .cv-archived { border-radius: 12px; font-size: 13.5px; }
+        .gb-admin-ui .cv-back-link, .gb-admin-ui .dc-back-link { color: #1a3a6b; font-size: 13.5px; }
+        .gb-admin-ui .dc-item { background: #f8fafd; border-color: #e1e7f0; }
+        .gb-admin-ui .dc-item strong { font-size: 14.5px; color: #14213a; }
+        .gb-admin-ui .dc-warning-title { font-size: 14.5px; }
+        .gb-admin-ui .dc-warning-text { font-size: 13.5px; }
+        .gb-admin-ui .dc-reason-label { font-size: 13px; color: #334155; }
+        .gb-admin-ui .dc-reason { min-height: 90px; font-size: 14.5px; color: #14213a; border: 1.5px solid #d6deea; border-radius: 10px; padding: 11px 13px; }
+        .gb-admin-ui .dc-reason:focus { outline: none; border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+        .gb-admin-ui .dc-cancel, .gb-admin-ui .dc-delete { border-radius: 10px; padding: 11px 18px; font-size: 14px; font-weight: 700; }
+        .gb-admin-ui .dc-cancel { border: 1.5px solid #d6deea; color: #334155; }
+        .gb-admin-ui .dc-actions { flex-wrap: wrap; }
+
+        /* Edit Case: the Status Correction button stays amber */
+        .gb-admin-ui .acs-save.uc-status-btn { background: #b45309; box-shadow: none; }
+        .gb-admin-ui .acs-save.uc-status-btn:hover { background: #92400e; filter: none; }
+
+        /* Residency Verification: navy instead of teal, larger small print */
+        .gb-admin-ui .rv-hero { border-color: #d6e2f5; background: linear-gradient(120deg, #fff 0%, #eef3fb 100%); }
+        .gb-admin-ui .rv-kicker, .gb-admin-ui .rv-modal-head span { color: #1a3a6b; font-size: 12px; }
+        .gb-admin-ui .rv-hero p { font-size: 14px; color: #4f5f75; }
+        .gb-admin-ui .rv-stat { border-color: #e1e7f0; border-radius: 14px; }
+        .gb-admin-ui .rv-stat:hover { border-color: #c9d6ea; }
+        .gb-admin-ui .rv-stat strong { font-size: 24px; color: #0b1a33; }
+        .gb-admin-ui .rv-stat small { font-size: 12.5px; color: #4f5f75; }
+        .gb-admin-ui .rv-panel { border-color: #e1e7f0; }
+        .gb-admin-ui .rv-panel-head h2 { color: #0b1a33; }
+        .gb-admin-ui .rv-panel-head p { font-size: 13px; color: #4f5f75; }
+        .gb-admin-ui .rv-count { font-size: 12px; color: #1a3a6b; background: #eef3fb; }
+        .gb-admin-ui .rv-search-form { border: 1.5px solid #d6deea; background: #fff; }
+        .gb-admin-ui .rv-search-form:focus-within { border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+        .gb-admin-ui .rv-search-form > i { color: #1a3a6b; }
+        .gb-admin-ui .rv-search-form input { font-size: 14px; color: #14213a; }
+        .gb-admin-ui .rv-search-form button, .gb-admin-ui .rv-review-form button:not(.rv-review-close) {
+            background: linear-gradient(135deg, #24508f, #0e2242); border-radius: 8px; font-size: 13px; padding: 9px 15px;
+        }
+        .gb-admin-ui .rv-search-form button:hover, .gb-admin-ui .rv-review-form button:not(.rv-review-close):hover { background: linear-gradient(135deg, #24508f, #0e2242); filter: brightness(1.08); }
+        .gb-admin-ui .rv-tabs a { font-size: 13px; color: #334155; border: 1.5px solid #e1e7f0; border-radius: 10px; padding: 9px 13px; }
+        .gb-admin-ui .rv-tabs a:hover { border-color: #c9d6ea; background: #f6f9ff; }
+        .gb-admin-ui .rv-tabs a.active { background: linear-gradient(135deg, #24508f, #0e2242); border-color: transparent; color: #fff; }
+        .gb-admin-ui .rv-tabs b { font-size: 11.5px; background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .rv-tabs a.active b { background: rgba(255,255,255,.22); color: #fff; }
+        .gb-admin-ui .rv-table th { font-size: 11.5px; color: #4f5f75; background: #f5f7fb; border-bottom-color: #e1e7f0; }
+        .gb-admin-ui .rv-table td { font-size: 13.5px; color: #14213a; border-bottom-color: #eef2f7; }
+        .gb-admin-ui .rv-table td strong { font-size: 13.5px; color: #14213a; }
+        .gb-admin-ui .rv-table td:nth-child(6) strong { white-space: nowrap; }
+        .gb-admin-ui .rv-review-form textarea { min-height: 80px; }
+        .gb-admin-ui .rv-table td small { font-size: 12px; color: #4f5f75; }
+        .gb-admin-ui .rv-avatar { background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .rv-docs a, .gb-admin-ui .rv-details summary { color: #1a3a6b; font-size: 12.5px; }
+        .gb-admin-ui .rv-status { font-size: 12px; padding: 4px 10px; }
+        .gb-admin-ui .rv-note { font-size: 12px; }
+        .gb-admin-ui .rv-review-current { font-size: 12.5px; }
+        .gb-admin-ui .rv-review-form { border-color: #e1e7f0; border-radius: 12px; }
+        .gb-admin-ui .rv-review-form label { font-size: 12.5px; text-transform: none; letter-spacing: .1px; color: #334155; }
+        .gb-admin-ui .rv-review-form select, .gb-admin-ui .rv-review-form textarea { font-size: 13.5px; font-weight: 400; border: 1.5px solid #d6deea; border-radius: 8px; padding: 8px 10px; }
+        .gb-admin-ui .rv-review-form select:focus, .gb-admin-ui .rv-review-form textarea:focus { outline: none; border-color: #24508f; box-shadow: 0 0 0 3px rgba(36,80,143,.12); }
+        .gb-admin-ui .rv-delete-button { font-size: 12px; border-radius: 8px; }
+        .gb-admin-ui .rv-zoom-tools button:hover { border-color: #1a3a6b; color: #1a3a6b; background: #f6f9ff; }
+        .gb-admin-ui .rv-empty i { color: #9fb3d1; }
+        .gb-admin-ui .rv-empty span { font-size: 13px; }
+
+        /* Records Archive: navy tabs and buttons, readable table text */
+        .gb-admin-ui .ar-intro { font-size: 14px; color: #4f5f75; }
+        .gb-admin-ui .ar-tab { border: 1.5px solid #e1e7f0; border-radius: 10px; color: #334155; }
+        .gb-admin-ui .ar-tab:hover { border-color: #c9d6ea; background: #f6f9ff; color: #14213a; }
+        .gb-admin-ui .ar-tab span { background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .ar-tab.active { background: linear-gradient(135deg, #24508f, #0e2242); border-color: transparent; color: #fff; box-shadow: 0 6px 14px rgba(26,58,107,.22); }
+        .gb-admin-ui .ar-tab.active span { background: rgba(255,255,255,.22); color: #fff; }
+        .gb-admin-ui .ar-card { border-color: #e1e7f0; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045); }
+        .gb-admin-ui .ar-toolbar { border-bottom-color: #e1e7f0; }
+        .gb-admin-ui .ar-search input, .gb-admin-ui .ar-toolbar select { height: 42px; border: 1.5px solid #d6deea; border-radius: 10px; background: #fff; color: #14213a; font-size: 13.5px; }
+        .gb-admin-ui .ar-search input { padding-left: 36px; }
+        .gb-admin-ui .ar-search i { color: #6f7f96; }
+        .gb-admin-ui .ar-search input:focus, .gb-admin-ui .ar-toolbar select:focus { border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+        .gb-admin-ui .ar-btn { height: 42px; border: 1.5px solid #d6deea; border-radius: 10px; color: #334155; font-size: 13.5px; font-weight: 700; }
+        .gb-admin-ui .ar-btn.primary { background: linear-gradient(135deg, #24508f, #0e2242); border-color: transparent; color: #fff; box-shadow: 0 6px 14px rgba(26,58,107,.2); }
+        .gb-admin-ui .ar-btn.primary:hover { filter: brightness(1.08); }
+        .gb-admin-ui .ar-table { font-size: 13.5px; }
+        .gb-admin-ui .ar-table th { color: #4f5f75; background: #f5f7fb; border-bottom: 1px solid #e1e7f0; }
+        .gb-admin-ui .ar-table td { color: #14213a; border-bottom-color: #eef2f7; }
+        .gb-admin-ui .ar-table tbody tr:hover td { background: #f6f9ff; }
+        .gb-admin-ui .ar-table td strong { color: #14213a; }
+        .gb-admin-ui .ar-table td small, .gb-admin-ui .ar-muted { font-size: 12px; color: #4f5f75; }
+        .gb-admin-ui .ar-id { font-size: 12.5px; background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .ar-avatar { background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .ar-date strong { font-size: 13px; }
+        .gb-admin-ui .ar-reason { font-size: 13px; color: #334155; }
+        .gb-admin-ui .ar-badge { font-size: 12.5px; }
+        .gb-admin-ui .ar-hold { font-size: 11px; }
+        .gb-admin-ui .ar-act { border-radius: 9px; padding: 7px 12px; font-size: 12.5px; font-weight: 700; }
+        .gb-admin-ui .ar-act.view { border-color: #d6e2f5; background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .ar-act.view:hover { background: #dfe8f7; filter: none; }
+        .gb-admin-ui .ar-empty i { color: #9fb3d1; }
+
+        /* Analytics: same cards as the rest of the admin pages; chart colours stay (they match the status groups) */
+        .gb-admin-ui .an-body, .gb-admin-ui .rp-body { padding: 26px 32px 44px; }
+        .gb-admin-ui .an-sub, .gb-admin-ui .rp-intro { font-size: 14px; color: #4f5f75; }
+        .gb-admin-ui .an-live { font-size: 12.5px; color: #4f5f75; }
+        .gb-admin-ui .an-date { font-size: 13px; color: #1a3a6b; background: #eef3fb; border-color: #d6e2f5; font-weight: 600; }
+        .gb-admin-ui .an-kpi, .gb-admin-ui .an-card, .gb-admin-ui .rp-quick, .gb-admin-ui .rp-card {
+            border-color: #e1e7f0; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.045);
+        }
+        .gb-admin-ui .an-kpi-label { font-size: 13px; text-transform: none; letter-spacing: .1px; color: #334155; }
+        .gb-admin-ui .an-kpi-val { color: #0b1a33; }
+        .gb-admin-ui .an-kpi-sub { font-size: 12.5px; color: #4f5f75; }
+        .gb-admin-ui .an-card-title { font-size: 16px; color: #14213a; }
+        .gb-admin-ui .an-card-sub { font-size: 13px; color: #4f5f75; }
+        .gb-admin-ui .an-switch { background: #eef3fb; border-radius: 10px; }
+        .gb-admin-ui .an-switch a { font-size: 12.5px; color: #4f5f75; border-radius: 8px; }
+        .gb-admin-ui .an-switch a.active { color: #fff; background: linear-gradient(135deg, #24508f, #0e2242); box-shadow: 0 3px 8px rgba(26,58,107,.22); }
+        .gb-admin-ui .an-legend { font-size: 13px; color: #334155; }
+        .gb-admin-ui .an-type-list div, .gb-admin-ui .an-outcome-row { font-size: 13.5px; color: #14213a; }
+        .gb-admin-ui .an-track { height: 7px; background: #eef2f7; }
+        .gb-admin-ui .an-usage-item:hover { background: #f6f9ff; }
+        .gb-admin-ui .an-usage-label { font-size: 14px; color: #14213a; }
+        .gb-admin-ui .an-usage-item strong { color: #0b1a33; }
+        .gb-admin-ui .an-empty { font-size: 13px; color: #6f7f96; }
+
+        /* Reports: navy download buttons on every card; each period keeps its own icon colour */
+        .gb-admin-ui .rp-section h2 { font-size: 17px; color: #0b1a33; }
+        .gb-admin-ui .rp-section p { font-size: 13.5px; color: #4f5f75; }
+        .gb-admin-ui .rp-quick { border-top: 3px solid #1a3a6b; }
+        .gb-admin-ui .rp-quick-title { font-size: 16px; color: #14213a; }
+        .gb-admin-ui .rp-quick-sub { font-size: 13px; color: #4f5f75; }
+        .gb-admin-ui .rp-quick-count { font-size: 12px; color: #1a3a6b; background: #eef3fb; }
+        .gb-admin-ui .rp-quick-btn, .gb-admin-ui .rp-btn.amber {
+            background: linear-gradient(135deg, #24508f, #0e2242); border-radius: 10px; font-size: 13.5px; font-weight: 700; box-shadow: 0 6px 14px rgba(26,58,107,.2);
+        }
+        .gb-admin-ui .rp-quick-btn { padding: 11px 14px; }
+        .gb-admin-ui .rp-quick-btn:hover, .gb-admin-ui .rp-btn.amber:hover { background: linear-gradient(135deg, #24508f, #0e2242); filter: brightness(1.08); }
+        .gb-admin-ui .rp-btn { height: 42px; padding: 0 16px; }
+        .gb-admin-ui .rp-card h2, .gb-admin-ui .rp-card h3 { color: #14213a; }
+        .gb-admin-ui .rp-month-form label { font-size: 13px; text-transform: none; letter-spacing: .1px; color: #334155; }
+        .gb-admin-ui .rp-month-form select { height: 42px; font-size: 14px; color: #14213a; border: 1.5px solid #d6deea; border-radius: 10px; }
+        .gb-admin-ui .rp-month-form select:focus { outline: none; border-color: #24508f; box-shadow: 0 0 0 4px rgba(36,80,143,.12); }
+        .gb-admin-ui .rp-link { border: 1.5px solid #e1e7f0; border-radius: 12px; }
+        .gb-admin-ui .rp-link:hover { border-color: #1a3a6b; background: #f6f9ff; }
+        .gb-admin-ui .rp-link-icon { background: #eef3fb; color: #1a3a6b; }
+        .gb-admin-ui .rp-link strong { font-size: 14px; color: #14213a; }
+        .gb-admin-ui .rp-link small { font-size: 12.5px; color: #4f5f75; }
+        .gb-admin-ui .rp-link:hover > i { color: #1a3a6b; }
     </style>
     <?php $gbBellEndpoint = 'recent_activity.php'; include __DIR__ . '/activity_bell.php'; ?>
     <?php require_once __DIR__ . '/lottie.php'; gabaybatas_lottie_loader(); ?>
+    <script src="../assets/js/placeholder-marquee.js" defer></script>
+    <?php require_once __DIR__ . '/logout_confirm.php'; gabaybatas_logout_confirm('Admin'); ?>
     <script>
     window.AdminToast = window.AdminToast || (function () {
         let host = null;
@@ -762,4 +1108,4 @@
     })();
     </script>
 </head>
-<body>
+<body class="gb-admin-ui">

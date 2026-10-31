@@ -87,13 +87,31 @@ if (!function_exists('gabaybatas_flex_params')) {
             [$from, $to] = [$to, $from];
         }
 
+        // Specific cases: ticked rows (?cases=37,55) or several case numbers typed in Search
+        // ("C-0037, C-0055"), kept as row ids. One number alone stays an ordinary search.
+        $search = mb_substr(trim((string)($in['search'] ?? '')), 0, 100);
+        $rawCases = $in['cases'] ?? '';
+        if ($rawCases === '' && preg_match('/^\s*(C\s*-?\s*)?\d+(\s*[,;]\s*(C\s*-?\s*)?\d+)+\s*[,;]?\s*$/i', $search)) {
+            $rawCases = $search;
+            $search = '';
+        }
+        $tokens = is_array($rawCases) ? $rawCases : preg_split('/[\s,;]+/', (string)$rawCases);
+        $caseIds = [];
+        foreach ($tokens as $token) {
+            $digits = preg_replace('/^\s*C\s*-\s*/i', '', trim((string)$token));
+            if (ctype_digit($digits) && (int)$digits > 0) {
+                $caseIds[(int)$digits] = true;
+            }
+        }
+
         return [
             'period'    => $period,
             'status'    => $status,
             'case_type' => gabaybatas_normalize_case_type((string)($in['case_type'] ?? '')) ?: trim((string)($in['case_type'] ?? '')),
-            'search'    => mb_substr(trim((string)($in['search'] ?? '')), 0, 100),
+            'search'    => $search,
             'date_from' => $from,
             'date_to'   => $to,
+            'cases'     => implode(',', array_slice(array_keys($caseIds), 0, 200)),
         ];
     }
 }
@@ -121,9 +139,22 @@ if (!function_exists('gabaybatas_flex_report')) {
             $args[] = $barangay;
         }
 
+        // Specific cases replace the other filters: the report lists exactly these
+        // (still only this barangay's non-archived cases).
+        $caseIds = array_values(array_filter(array_map('intval', explode(',', (string)($p['cases'] ?? '')))));
+        if ($caseIds) {
+            $codes = array_map(static fn(int $id): string => 'C-' . str_pad((string)$id, 4, '0', STR_PAD_LEFT), $caseIds);
+            $marks = implode(',', array_fill(0, count($caseIds), '?'));
+            $where[] = "(c.id IN ({$marks}) OR c.case_id IN ({$marks}))";
+            $types .= str_repeat('i', count($caseIds)) . str_repeat('s', count($codes));
+            array_push($args, ...$caseIds, ...$codes);
+            $applied[] = 'Selected cases: ' . implode(', ', $codes);
+            $p = ['period' => 'all', 'status' => '', 'case_type' => '', 'search' => ''] + $p;
+        }
+
         // Period
         $range = null;
-        $periodLabel = 'All periods';
+        $periodLabel = $caseIds ? 'Selected cases' : 'All periods';
         if ($p['period'] === 'month') {
             $range = [$now->format('Y-m-01'), $now->format('Y-m-t')];
             $periodLabel = $now->format('F Y');

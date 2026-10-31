@@ -91,11 +91,17 @@ $firstName = trim((string)explode(' ', (string)($_SESSION['name'] ?? 'Admin'))[0
 
     <!-- Greeting -->
     <div class="db-greeting fade-up" style="--d:0s">
-        <div>
-            <h1 class="db-title">Good <?= (date('H')<12?'Morning':(date('H')<17?'Afternoon':'Evening')) ?>, <?= htmlspecialchars($firstName !== '' ? $firstName : 'Admin') ?></h1>
-            <p class="db-sub">Katarungang Pambarangay cases of Barangay <?= htmlspecialchars(KP_BARANGAY_NAME) ?> — <?= date('l, F j, Y') ?></p>
+        <div class="db-greeting-main">
+            <span class="db-seals">
+                <span class="db-seal"><img src="../images/seal_city_catbalogan.png" alt=""></span>
+                <span class="db-seal"><img src="../images/seal_barangay_munoz.png" alt=""></span>
+            </span>
+            <div>
+                <h1 class="db-title">Good <?= (date('H')<12?'Morning':(date('H')<17?'Afternoon':'Evening')) ?>, <?= htmlspecialchars($firstName !== '' ? $firstName : 'Admin') ?></h1>
+                <p class="db-sub">Katarungang Pambarangay cases of Barangay <?= htmlspecialchars(KP_BARANGAY_NAME) ?> — <?= date('l, F j, Y') ?></p>
+            </div>
         </div>
-        <a href="all_cases.php" class="db-cta"><i class="uil uil-arrow-right"></i> Manage Cases</a>
+        <a href="all_cases.php" class="db-cta"><i class="uil uil-folder-open"></i> Manage Cases <i class="uil uil-arrow-right"></i></a>
     </div>
 
     <!-- Case summary (same cards as the barangay Home page and Flexible Reports) -->
@@ -164,8 +170,8 @@ $firstName = trim((string)explode(' ', (string)($_SESSION['name'] ?? 'Admin'))[0
                         </td>
                         <td><?= htmlspecialchars((string)($row['complained_person'] ?: '—')) ?></td>
                         <td><?= htmlspecialchars((string)($row['case_type'] ?: '—')) ?></td>
-                        <td><span class="db-badge" style="background:<?= $color ?>18;color:<?= $color ?>;"><?= htmlspecialchars(kp_status_label($row['kp_status'])) ?></span></td>
-                        <td class="db-date"><?= $ts ? date('M d, Y h:i A', $ts) : '—' ?></td>
+                        <td><span class="db-badge" style="background:<?= $color ?>18;color:<?= $color ?>;border-color:<?= $color ?>40;"><?= htmlspecialchars(kp_status_label($row['kp_status'])) ?></span></td>
+                        <td class="db-date"><?php if ($ts): ?><strong><?= date('M d, Y', $ts) ?></strong><small><?= date('h:i A', $ts) ?></small><?php else: ?>—<?php endif; ?></td>
                         <td><a href="view_case.php?id=<?= (int)$row['id'] ?>" class="db-action-btn"><i class="uil uil-eye"></i> View</a></td>
                     </tr>
                     <?php endforeach; ?>
@@ -291,6 +297,41 @@ new Chart(document.getElementById('typeChart'), {
 .db-action-btn{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;color:#3b82f6;text-decoration:none;padding:5px 12px;border-radius:8px;border:1px solid #dbeafe;background:#eff6ff;transition:background .15s;}
 .db-action-btn:hover{background:#dbeafe;}
 
+/* ── UI refresh (admin theme) ── */
+.gb-admin-ui .db-body{padding:26px 32px 44px;}
+.gb-admin-ui .db-greeting{position:relative;overflow:hidden;gap:18px;padding:22px 26px;border-radius:16px;background:radial-gradient(circle at 0% 0%,rgba(255,255,255,.10),transparent 45%),linear-gradient(135deg,#1a3a6b 0%,#0e2242 70%,#0b1a33 100%);box-shadow:0 14px 34px rgba(14,34,66,.22);margin-bottom:18px;}
+.gb-admin-ui .db-greeting::after{content:'';position:absolute;right:-60px;top:-80px;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(201,162,39,.18),transparent 65%);pointer-events:none;}
+.db-greeting-main{display:flex;align-items:center;gap:16px;position:relative;z-index:1;}
+.db-seals{display:flex;gap:6px;flex-shrink:0;}
+.db-seal{width:52px;height:52px;border-radius:50%;background:#fff;padding:3px;box-shadow:0 0 0 3px rgba(255,255,255,.16),0 8px 18px rgba(0,0,0,.25);}
+.db-seal img{width:100%;height:100%;object-fit:contain;border-radius:50%;}
+.gb-admin-ui .db-title{font-family:'Source Serif 4',serif;font-size:22px;color:#fff;}
+.gb-admin-ui .db-sub{font-size:13.5px;color:rgba(255,255,255,.78);}
+.gb-admin-ui .db-cta{position:relative;z-index:1;background:#fff;color:#0e2242;padding:11px 18px;font-size:14px;font-weight:700;white-space:nowrap;box-shadow:0 8px 18px rgba(0,0,0,.18);}
+.gb-admin-ui .db-cta:hover{background:#eef3fb;}
+.gb-admin-ui .gb-sum-card{border-radius:14px;border-right-color:#e1e7f0;border-bottom-color:#e1e7f0;border-left-color:#e1e7f0;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.045);}
+.gb-admin-ui .gb-sum-label{color:#4f5f75;}
+.gb-admin-ui .gb-sum-sub{color:#6f7f96;}
+.gb-admin-ui .db-card{border-radius:14px;border-color:#e1e7f0;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.045);}
+.gb-admin-ui .db-card-title{font-size:15px;color:#14213a;}
+.gb-admin-ui .db-card-sub{font-size:12.5px;color:#6f7f96;}
+.gb-admin-ui .db-month-form select{min-height:38px;border:1.5px solid #d6deea;border-radius:10px;font-size:13px;}
+.gb-admin-ui .db-chart-panel{border-color:#edf1f7;background:#fbfcfe;}
+.gb-admin-ui .db-view-all{color:#1a3a6b;background:#eef3fb;padding:8px 13px;border-radius:10px;font-size:13px;font-weight:700;}
+.gb-admin-ui .db-view-all:hover{background:#dfe8f7;}
+.gb-admin-ui .db-table th{text-align:left;background:#f5f7fb;color:#5b6b82;font-size:11.5px;font-weight:700;padding:13px 16px;}
+.gb-admin-ui .db-table td{text-align:left;padding:15px 16px;font-size:14px;border-bottom-color:#edf1f7;}
+.gb-admin-ui .db-table tbody tr:hover td{background:#f6f9ff;}
+.gb-admin-ui .db-name-cell{justify-content:flex-start;}
+.gb-admin-ui .db-avatar-sm{background:#eef3fb;color:#1a3a6b;}
+.gb-admin-ui .db-case-id{font-size:12.5px;font-weight:600;white-space:nowrap;}
+.gb-admin-ui .db-badge{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 11px;border:1px solid transparent;}
+.gb-admin-ui .db-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;}
+.gb-admin-ui .db-date strong{display:block;font-size:13.5px;font-weight:600;color:#14213a;white-space:nowrap;}
+.gb-admin-ui .db-date small{display:block;font-size:12.5px;color:#6f7f96;}
+.gb-admin-ui .db-action-btn{color:#1a3a6b;background:#fff;border:1.5px solid #c9d6ea;border-radius:10px;padding:7px 13px;font-size:13px;}
+.gb-admin-ui .db-action-btn:hover{background:#f6f9ff;border-color:#1a3a6b;}
+@media(max-width:760px){.gb-admin-ui .db-greeting{flex-direction:column;align-items:flex-start;}}
 @media(max-width:1200px){.db-kpi-grid{grid-template-columns:repeat(3,1fr);}}
 @media(max-width:1100px){.db-charts{grid-template-columns:1fr;}}
 @media(max-width:640px){.db-kpi-grid{grid-template-columns:1fr 1fr;}.db-body{padding:16px;}}

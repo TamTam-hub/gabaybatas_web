@@ -1,10 +1,10 @@
-<?php $page = basename($_SERVER['PHP_SELF']); ?>
+<?php $page = basename($_SERVER['PHP_SELF']); require_once __DIR__ . '/brand_mark.php'; ?>
 
 <div class="sidebar">
     <div class="sidebar-brand">
         <div class="brand-row">
             <div class="brand-shield">
-                <i class="uil uil-shield-check"></i>
+                <i class="gb-mark"><?= gabaybatas_brand_mark() ?></i>
             </div>
             <div>
                 <div class="brand-name">GabayBatas</div>
@@ -38,8 +38,8 @@
     </nav>
 
     <div class="sidebar-footer">
-        <a href="../logout.php">
-            <i class="uil uil-sign-out-alt"></i> Logout
+        <a href="../logout.php" class="gb-logout">
+            <i class="uil uil-signout"></i> Logout
         </a>
     </div>
 </div>

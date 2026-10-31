@@ -112,7 +112,7 @@ $confirmToken = md5($userId . session_id());
 <div class="main">
 <div class="topbar">
     <div class="topbar-left">
-        <div class="topbar-title">Delete User</div>
+        <div class="topbar-title">Archive User</div>
         <span class="topbar-badge">Admin</span>
     </div>
     <div class="topbar-right">
@@ -169,7 +169,7 @@ $confirmToken = md5($userId . session_id());
                 </div>
                 <div class="du-info-item">
                     <span class="du-label">Role</span>
-                    <span class="du-value"><?= htmlspecialchars((string)($user['role'] ?? 'N/A')) ?></span>
+                    <span class="du-value"><?php $duRole = strtolower(trim((string)($user['role'] ?? ''))); ?><?= htmlspecialchars(['admin' => 'Administrator', 'barangay' => 'Barangay Official', 'resident' => 'Resident'][$duRole] ?? ($duRole !== '' ? ucwords($duRole) : 'N/A')) ?></span>
                 </div>
             </div>
 

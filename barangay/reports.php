@@ -10,6 +10,7 @@ require_once '../config/database.php';
 require_once __DIR__ . '/../includes/barangay_auth.php';
 require_once __DIR__ . '/../includes/flexible_report.php';
 require_once __DIR__ . '/../includes/pagination.php';
+require_once __DIR__ . '/../includes/case_selection.php';
 gabaybatas_block_barangay_delete_requests();
 
 $currentBarangay = gabaybatas_get_user_barangay($conn);
@@ -30,6 +31,8 @@ foreach (kp_statuses() as $key => $info) {
 
 $downloadUrl = 'generate_report.php?' . http_build_query(array_filter($params, static fn($v) => $v !== ''));
 $allDataUrl = 'generate_report.php?period=all';
+// Selected cases are shown back in the Search box as case numbers (ids are kept in $params['cases']).
+$caseCodes = $params['cases'] === '' ? '' : implode(', ', array_map(static fn($id) => 'C-' . str_pad($id, 4, '0', STR_PAD_LEFT), explode(',', $params['cases'])));
 ?>
 <?php include('../includes/header.php'); ?>
 <?php include('../includes/sidebar_barangay.php'); ?>
@@ -113,7 +116,7 @@ $allDataUrl = 'generate_report.php?period=all';
 
                 <div class="filter-group">
                     <label class="filter-label" for="searchInput">Search</label>
-                    <input class="filter-input" type="text" name="search" id="searchInput" value="<?= htmlspecialchars($params['search']) ?>" placeholder="Case no., complainant, respondent">
+                    <input class="filter-input" type="text" name="search" id="searchInput" value="<?= htmlspecialchars($caseCodes !== '' ? $caseCodes : $params['search']) ?>" placeholder="Case no., name, or several: C-0037, C-0055" title="Type a case number or name. To list specific cases, type several case numbers separated by commas.">
                 </div>
 
                 <div class="filter-actions">
@@ -131,6 +134,10 @@ $allDataUrl = 'generate_report.php?period=all';
                     <?php endforeach; ?>
                 <?php else: ?>
                     <span class="applied-note">No filters. Showing all non-archived cases of Barangay <?= htmlspecialchars(KP_BARANGAY_NAME) ?>.</span>
+                <?php endif; ?>
+                <?php if ($params['cases'] !== ''): ?>
+                    <span class="applied-note">Only these cases are listed; the other filters are not used.</span>
+                    <a href="reports.php" class="applied-clear"><i class="uil uil-times"></i> Clear</a>
                 <?php endif; ?>
             </div>
         </div>
@@ -152,6 +159,7 @@ $allDataUrl = 'generate_report.php?period=all';
                 <table class="table-dashboard">
                     <thead>
                         <tr>
+                            <th class="gb-sel-col"><input type="checkbox" class="gb-sel-all" aria-label="Select all cases on this page" title="Select all on this page"></th>
                             <th>Case No.</th>
                             <th>Complainant</th>
                             <th>Respondent</th>
@@ -166,8 +174,10 @@ $allDataUrl = 'generate_report.php?period=all';
                                 $color = kp_status_color($row['kp_status']);
                                 $dateTs = strtotime((string)$row['date_submitted']);
                             ?>
+                            <?php $rowCode = gabaybatas_format_case_id($row['case_id'] ?? '', $row['id'] ?? ''); ?>
                             <tr>
-                                <td><strong><?= htmlspecialchars(gabaybatas_format_case_id($row['case_id'] ?? '', $row['id'] ?? '')) ?></strong></td>
+                                <td class="gb-sel-col"><input type="checkbox" class="gb-sel" value="<?= (int)$row['id'] ?>" data-code="<?= htmlspecialchars($rowCode) ?>" aria-label="Select <?= htmlspecialchars($rowCode) ?>"></td>
+                                <td><strong><?= htmlspecialchars($rowCode) ?></strong></td>
                                 <td><?= htmlspecialchars((string)($row['name'] ?: '—')) ?></td>
                                 <td><?= htmlspecialchars((string)($row['complained_person'] ?: '—')) ?></td>
                                 <td><?= htmlspecialchars((string)($row['case_type'] ?: '—')) ?></td>
@@ -177,13 +187,14 @@ $allDataUrl = 'generate_report.php?period=all';
                             <?php endforeach; ?>
                         <?php else: ?>
                         <tr>
-                            <td colspan="6" class="empty-row">No cases match the selected filters.</td>
+                            <td colspan="7" class="empty-row">No cases match the selected filters.</td>
                         </tr>
                         <?php endif; ?>
                     </tbody>
                 </table>
             </div>
             <?php gabaybatas_pagination($report['total'], $pageNo, $perPage, $params, 'cases'); ?>
+            <?php gabaybatas_case_selection_bar('generate_report.php', 'reports.php'); ?>
         </div>
     </div>
 </div>
@@ -260,6 +271,7 @@ $allDataUrl = 'generate_report.php?period=all';
 .gb-ui .applied-pill { background: #eef3fb; border-color: #d6e2f5; color: #1a3a6b; font-size: 12.5px; }
 .gb-ui .record-count { background: #eef3fb; border-color: #d6e2f5; color: #1a3a6b; font-weight: 700; font-size: 12.5px; }
 .gb-ui .status-badge { font-size: 12px; padding: 4px 11px; }
+.applied-clear { display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 700; color: #b91c1c; text-decoration: none; }
 .rp-date strong { display: block; font-weight: 600; white-space: nowrap; }
 .rp-date small { display: block; font-size: 12.5px; color: #6f7f96; }
 .empty-row { text-align: center; color: #94a3b8; padding: 24px 10px; }
