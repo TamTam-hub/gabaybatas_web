@@ -130,7 +130,7 @@ body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; backgr
 /* ── Right: sign in ── */
 .panel { display: flex; flex-direction: column; justify-content: center; padding: 44px 48px 30px; }
 .app-mark { display: inline-flex; align-items: center; gap: 9px; margin-bottom: 26px; }
-.app-mark i { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--navy-700); color: #fff; font-size: 18px; }
+.app-mark i { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: linear-gradient(135deg, #2f6fd8, #1a4ca3); color: #fff; font-size: 18px; }
 .app-mark b { font-family: 'Source Serif 4', serif; font-size: 18px; color: var(--navy-800); }
 .app-mark small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .3px; }
 .panel h1 { font-family: 'Source Serif 4', serif; font-size: 30px; font-weight: 700; color: var(--ink); line-height: 1.15; }
@@ -214,7 +214,7 @@ body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; backgr
             </div>
         </div>
 
-        <div class="brand-foot"><i class="uil uil-shield-check"></i> Official case management portal of the Office of the Punong Barangay</div>
+        <div class="brand-foot"><i class="uil uil-shield-check"></i> For authorized barangay personnel only.</div>
     </section>
 
     <section class="panel">
