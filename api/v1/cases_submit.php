@@ -168,6 +168,28 @@ if ($duplicateRow) {
     api_error('Duplicate case submission. Please check your previous entry.', 409);
 }
 
+// One dispute, one case: no new complaint against the same respondent while
+// the resident's earlier case against them is still unfinished.
+if (api_has_column($caseColumns, 'user_id') && api_has_column($caseColumns, 'kp_status') && $complainedColumn !== null) {
+    $finishedStatuses = ['not_eligible', 'referred', 'certified_to_court', 'dismissed', 'closed'];
+    $activeSql = "SELECT case_id, {$complainedColumn} AS respondent FROM cases WHERE user_id = ? AND archived_at IS NULL
+        AND LOWER(TRIM(REGEXP_REPLACE({$complainedColumn}, '[[:space:]]+', ' '))) = ?
+        AND COALESCE(kp_status, '') NOT IN (" . implode(',', array_fill(0, count($finishedStatuses), '?')) . ") LIMIT 1";
+    $activeStmt = $conn->prepare($activeSql);
+    if ($activeStmt) {
+        $activeUserId = (int)($user['user_id'] ?? 0);
+        $respondentKey = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $complainedPerson)));
+        $activeStmt->bind_param('is' . str_repeat('s', count($finishedStatuses)), $activeUserId, $respondentKey, ...$finishedStatuses);
+        $activeStmt->execute();
+        $activeRow = $activeStmt->get_result()->fetch_assoc();
+        $activeStmt->close();
+        if ($activeRow) {
+            $activeRef = (string)($activeRow['case_id'] ?? '');
+            api_error("You already have an ongoing case against " . ($activeRow['respondent'] ?: $complainedPerson) . ($activeRef !== '' ? " ({$activeRef})" : '') . '. Please follow it in Track Your Case instead of filing a new one.', 409);
+        }
+    }
+}
+
 $submissionHash = hash(
     'sha256',
     implode('|', [

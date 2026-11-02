@@ -61,6 +61,17 @@ if ($case['kp_status'] !== 'pangkat_constitution' || $existing > 0) {
     exit();
 }
 
+// The members are chosen at the constitution meeting (KP Form 10).
+$meeting = $conn->query("SELECT id FROM kp_hearings WHERE case_id = {$caseId} AND stage = 'conciliation' AND purpose_type = 'pangkat_constitution' AND (outcome IS NULL OR outcome = '') ORDER BY id DESC LIMIT 1")->fetch_assoc();
+if (!$meeting) {
+    header("Location: case_process.php?id={$caseId}&kp_error=meeting_required#pangkat");
+    exit();
+}
+$held = $conn->prepare("UPDATE kp_hearings SET outcome = 'Meeting held' WHERE id = ? LIMIT 1");
+$held->bind_param('i', $meeting['id']);
+$held->execute();
+$held->close();
+
 foreach ($members as $i => $m) {
     $role = $i === $chairman ? 'chairman' : ($i === $secretary ? 'secretary' : 'member');
     $stmt = $conn->prepare("INSERT INTO kp_pangkat (case_id, member_name, chosen_by, role) VALUES (?, ?, ?, ?)");

@@ -20,11 +20,15 @@ if ($caseIdRaw === '') {
 }
 
 $additionalInfo = trim((string)($_POST['additional_info'] ?? $_POST['description'] ?? $payload['additional_info'] ?? $payload['description'] ?? ''));
+// The complaint reason ("tungod ...") as corrected by the resident; the statement is rebuilt from it.
+$reason = trim((string)($_POST['reason'] ?? $payload['reason'] ?? ''));
 $complainedPerson = trim((string)($_POST['complained_person'] ?? $payload['complained_person'] ?? ''));
 
-if ($additionalInfo === '' && $complainedPerson === '' && empty($_FILES)) {
-    api_error('Provide additional information or attach replacement evidence.', 422);
+$removeRaw = $_POST['remove_evidence_ids'] ?? $payload['remove_evidence_ids'] ?? [];
+if (!is_array($removeRaw)) {
+    $removeRaw = explode(',', (string)$removeRaw);
 }
+$removeIds = array_values(array_unique(array_filter(array_map('intval', $removeRaw), fn($id) => $id > 0)));
 
 $userId = (int)($user['user_id'] ?? 0);
 
@@ -53,23 +57,97 @@ if (in_array($currentKpStatus, $nonEditableStatuses, true)) {
     api_error('This case is already in final disposition and cannot be modified.', 422);
 }
 
+// Collect uploaded photos (evidence_images[] or any evidence_image* key).
+$uploadedImages = [];
+foreach ($_FILES as $key => $fileData) {
+    if ($key === 'evidence_video' || strpos($key, 'evidence_image') === false) {
+        continue;
+    }
+    $names = (array)$fileData['name'];
+    foreach (array_keys($names) as $i) {
+        $error = is_array($fileData['error']) ? ($fileData['error'][$i] ?? UPLOAD_ERR_NO_FILE) : $fileData['error'];
+        $size = (int)(is_array($fileData['size']) ? ($fileData['size'][$i] ?? 0) : $fileData['size']);
+        if ($error !== UPLOAD_ERR_OK || $size <= 0) {
+            continue;
+        }
+        $uploadedImages[] = [
+            'tmp_name' => is_array($fileData['tmp_name']) ? $fileData['tmp_name'][$i] : $fileData['tmp_name'],
+            'name' => $names[$i],
+            'type' => (is_array($fileData['type']) ? ($fileData['type'][$i] ?? '') : $fileData['type']) ?: 'image/jpeg',
+            'size' => $size,
+        ];
+    }
+}
+$video = (!empty($_FILES['evidence_video']) && ($_FILES['evidence_video']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK && ($_FILES['evidence_video']['size'] ?? 0) > 0)
+    ? $_FILES['evidence_video'] : null;
+
+// Evidence the resident chose to remove (only files of this case), and what stays.
+$existingEvidence = api_case_evidence($conn, $caseId);
+$removeIds = array_values(array_intersect($removeIds, array_map(fn($ev) => (int)$ev['id'], $existingEvidence)));
+$keptImages = 0;
+$keptVideoIds = [];
+foreach ($existingEvidence as $ev) {
+    if (in_array((int)$ev['id'], $removeIds, true)) {
+        continue;
+    }
+    if ($ev['type'] === 'video') {
+        $keptVideoIds[] = (int)$ev['id'];
+    } else {
+        $keptImages++;
+    }
+}
+if ($keptImages + count($uploadedImages) > 3) {
+    api_error('A case can have at most 3 photos. Remove a photo first before adding another.', 422);
+}
+// A new video replaces the one already attached.
+if ($video) {
+    $removeIds = array_merge($removeIds, $keptVideoIds);
+}
+
+if ($additionalInfo === '' && $reason === '' && $complainedPerson === '' && !$uploadedImages && !$video && !$removeIds) {
+    api_error('Provide additional information or update your evidence.', 422);
+}
+
 $conn->begin_transaction();
 
 $updateParts = [];
 $updateTypes = '';
 $updateValues = [];
+$updateLines = [];
 
-// 1. Update Description / Additional Information
+// 1. Update the complaint statement
+$existingDesc = trim((string)($case['description'] ?? ''));
+$statement = $reason !== '' ? gabaybatas_parse_complaint_statement($existingDesc) : null;
+if ($statement) {
+    $reasonBefore = rtrim($statement['reason'], " \t\n\r\0\x0B.");
+    $reasonAfter = rtrim($reason, " \t\n\r\0\x0B.");
+    if ($reasonAfter !== $reasonBefore) {
+        $rebuilt = gabaybatas_complaint_statement(
+            $statement['name'],
+            $statement['age'],
+            $statement['area'],
+            $statement['respondent'],
+            $statement['respondent_area'],
+            $reasonAfter
+        );
+        $existingDesc = $statement['extra'] !== '' ? $rebuilt . "\n\n" . $statement['extra'] : $rebuilt;
+        $updateLines[] = "New reason: tungod {$reasonAfter}";
+    }
+} else {
+    // Older free-text complaints cannot be rebuilt; the new details are added below them.
+    $additionalInfo = trim($additionalInfo . ($reason !== '' && $additionalInfo !== '' ? "\n" : '') . $reason);
+}
 if ($additionalInfo !== '') {
-    $existingDesc = trim((string)($case['description'] ?? ''));
     $updateStamp = date('M d, Y h:i A');
-    $combinedDesc = $existingDesc !== ''
+    $existingDesc = $existingDesc !== ''
         ? $existingDesc . "\n\n[Resident Update - {$updateStamp}]:\n" . $additionalInfo
         : $additionalInfo;
-
+    $updateLines[] = "Details provided: {$additionalInfo}";
+}
+if ($existingDesc !== trim((string)($case['description'] ?? ''))) {
     $updateParts[] = "description = ?";
     $updateTypes .= 's';
-    $updateValues[] = $combinedDesc;
+    $updateValues[] = $existingDesc;
 }
 
 // 2. Update Complained Person if provided
@@ -112,175 +190,94 @@ if (!empty($updateParts)) {
     $upStmt->close();
 }
 
-// 4. Handle optional evidence replacement uploads
+// 4. Store new evidence and remove what the resident took out
 $storageDir = __DIR__ . '/../../storage/case_evidence';
 if (!is_dir($storageDir)) {
     @mkdir($storageDir, 0777, true);
 }
 
-$uploadedImages = [];
-if (!empty($_FILES['evidence_images'])) {
-    $f = $_FILES['evidence_images'];
-    if (is_array($f['name'])) {
-        for ($i = 0; $i < count($f['name']); $i++) {
-            if (isset($f['error'][$i]) && $f['error'][$i] === UPLOAD_ERR_OK && ($f['size'][$i] ?? 0) > 0) {
-                $uploadedImages[] = [
-                    'tmp_name' => $f['tmp_name'][$i],
-                    'name' => $f['name'][$i],
-                    'type' => $f['type'][$i] ?? 'image/jpeg',
-                    'size' => $f['size'][$i]
-                ];
-            }
-        }
-    } elseif (($f['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK && ($f['size'] ?? 0) > 0) {
-        $uploadedImages[] = [
-            'tmp_name' => $f['tmp_name'],
-            'name' => $f['name'],
-            'type' => $f['type'] ?? 'image/jpeg',
-            'size' => $f['size']
-        ];
-    }
-}
-
-foreach ($_FILES as $key => $fileData) {
-    if ($key === 'evidence_images' || $key === 'evidence_video') continue;
-    if (strpos($key, 'evidence_image') !== false) {
-        if (is_array($fileData['name'])) {
-            for ($i = 0; $i < count($fileData['name']); $i++) {
-                if (isset($fileData['error'][$i]) && $fileData['error'][$i] === UPLOAD_ERR_OK && ($fileData['size'][$i] ?? 0) > 0) {
-                    $uploadedImages[] = [
-                        'tmp_name' => $fileData['tmp_name'][$i],
-                        'name' => $fileData['name'][$i],
-                        'type' => $fileData['type'][$i] ?? 'image/jpeg',
-                        'size' => $fileData['size'][$i]
-                    ];
-                }
-            }
-        } elseif (($fileData['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK && ($fileData['size'] ?? 0) > 0) {
-            $uploadedImages[] = [
-                'tmp_name' => $fileData['tmp_name'],
-                'name' => $fileData['name'],
-                'type' => $fileData['type'] ?? 'image/jpeg',
-                'size' => $fileData['size']
-            ];
-        }
-    }
-}
-
-$evidenceCount = 0;
-$newEvidenceIds = [];
+$newFiles = [];
 foreach ($uploadedImages as $img) {
-    $origName = basename((string)$img['name']);
+    $newFiles[] = ['file' => $img, 'type' => 'image', 'exts' => ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'], 'default' => 'jpg'];
+}
+if ($video) {
+    $newFiles[] = ['file' => $video, 'type' => 'video', 'exts' => ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp'], 'default' => 'mp4'];
+}
+
+$addedImages = 0;
+$addedVideo = false;
+foreach ($newFiles as $new) {
+    $file = $new['file'];
+    $origName = basename((string)$file['name']);
     $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
-    if (!in_array($ext, ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'], true)) {
-        $ext = 'jpg';
+    if (!in_array($ext, $new['exts'], true)) {
+        $ext = $new['default'];
     }
     $storedName = bin2hex(random_bytes(16)) . '.' . $ext;
-    $targetPath = $storageDir . '/' . $storedName;
-
-    if (move_uploaded_file($img['tmp_name'], $targetPath)) {
-        $mime = $img['type'];
-        if (empty($mime) || $mime === 'application/octet-stream') {
-            $mime = 'image/' . ($ext === 'jpg' ? 'jpeg' : $ext);
-        }
-        $evStmt = $conn->prepare(
-            'INSERT INTO api_case_evidence (case_id, user_id, evidence_type, stored_filename, original_filename, mime_type, file_size, created_at)
-             VALUES (?, ?, "image", ?, ?, ?, ?, NOW())'
-        );
-        if ($evStmt) {
-            $size = (int)$img['size'];
-            $evStmt->bind_param('iisssi', $caseId, $userId, $storedName, $origName, $mime, $size);
-            if ($evStmt->execute()) {
-                $newEvidenceIds[] = (int)$evStmt->insert_id;
-                $evidenceCount++;
+    if (!move_uploaded_file($file['tmp_name'], $storageDir . '/' . $storedName)) {
+        continue;
+    }
+    $mime = (string)$file['type'];
+    if ($mime === '' || $mime === 'application/octet-stream') {
+        $mime = $new['type'] . '/' . (['jpg' => 'jpeg', 'mov' => 'quicktime', '3gp' => '3gpp'][$ext] ?? $ext);
+    }
+    $evStmt = $conn->prepare(
+        'INSERT INTO api_case_evidence (case_id, user_id, evidence_type, stored_filename, original_filename, mime_type, file_size, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())'
+    );
+    if ($evStmt) {
+        $size = (int)$file['size'];
+        $evStmt->bind_param('iissssi', $caseId, $userId, $new['type'], $storedName, $origName, $mime, $size);
+        if ($evStmt->execute()) {
+            if ($new['type'] === 'video') {
+                $addedVideo = true;
+            } else {
+                $addedImages++;
             }
-            $evStmt->close();
         }
+        $evStmt->close();
     }
 }
 
-if (!empty($_FILES['evidence_video']) && ($_FILES['evidence_video']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK && ($_FILES['evidence_video']['size'] ?? 0) > 0) {
-    $v = $_FILES['evidence_video'];
-    $origName = basename((string)$v['name']);
-    $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
-    if (!in_array($ext, ['mp4', 'mov', 'avi', 'mkv', 'webm', '3gp'], true)) {
-        $ext = 'mp4';
-    }
-    $storedName = bin2hex(random_bytes(16)) . '.' . $ext;
-    $targetPath = $storageDir . '/' . $storedName;
-
-    if (move_uploaded_file($v['tmp_name'], $targetPath)) {
-        $mime = $v['type'];
-        if (empty($mime) || $mime === 'application/octet-stream') {
-            $mime = 'video/' . ($ext === 'mov' ? 'quicktime' : ($ext === '3gp' ? '3gpp' : $ext));
-        }
-        $evStmt = $conn->prepare(
-            'INSERT INTO api_case_evidence (case_id, user_id, evidence_type, stored_filename, original_filename, mime_type, file_size, created_at)
-             VALUES (?, ?, "video", ?, ?, ?, ?, NOW())'
-        );
-        if ($evStmt) {
-            $size = (int)$v['size'];
-            $evStmt->bind_param('iisssi', $caseId, $userId, $storedName, $origName, $mime, $size);
-            if ($evStmt->execute()) {
-                $newEvidenceIds[] = (int)$evStmt->insert_id;
-                $evidenceCount++;
-            }
-            $evStmt->close();
-        }
-    }
-}
-
-// Replace prior evidence only after at least one new file was stored.
-if ($newEvidenceIds) {
-    $oldEvidence = [];
-    $oldEvidenceDeleted = false;
-    $oldStmt = $conn->prepare('SELECT id, stored_filename FROM api_case_evidence WHERE case_id = ? AND id NOT IN (' . implode(',', array_fill(0, count($newEvidenceIds), '?')) . ')');
+$removedFiles = [];
+if ($removeIds) {
+    $placeholders = implode(',', array_fill(0, count($removeIds), '?'));
+    $types = 'i' . str_repeat('i', count($removeIds));
+    $oldStmt = $conn->prepare("SELECT stored_filename FROM api_case_evidence WHERE case_id = ? AND id IN ({$placeholders})");
     if ($oldStmt) {
-        $oldTypes = 'i' . str_repeat('i', count($newEvidenceIds));
-        $oldValues = array_merge([$caseId], $newEvidenceIds);
-        $oldStmt->bind_param($oldTypes, ...$oldValues);
+        $oldStmt->bind_param($types, $caseId, ...$removeIds);
         $oldStmt->execute();
-        $oldResult = $oldStmt->get_result();
-        while ($oldResult && ($oldRow = $oldResult->fetch_assoc())) {
-            $oldEvidence[] = $oldRow;
-        }
+        $removedFiles = array_column($oldStmt->get_result()->fetch_all(MYSQLI_ASSOC), 'stored_filename');
         $oldStmt->close();
     }
-
-    $deleteStmt = $conn->prepare('DELETE FROM api_case_evidence WHERE case_id = ? AND id NOT IN (' . implode(',', array_fill(0, count($newEvidenceIds), '?')) . ')');
+    $deleteStmt = $conn->prepare("DELETE FROM api_case_evidence WHERE case_id = ? AND id IN ({$placeholders})");
     if ($deleteStmt) {
-        $deleteTypes = 'i' . str_repeat('i', count($newEvidenceIds));
-        $deleteValues = array_merge([$caseId], $newEvidenceIds);
-        $deleteStmt->bind_param($deleteTypes, ...$deleteValues);
-        $oldEvidenceDeleted = $deleteStmt->execute();
+        $deleteStmt->bind_param($types, $caseId, ...$removeIds);
+        if (!$deleteStmt->execute()) {
+            $removedFiles = [];
+        }
         $deleteStmt->close();
     }
-
-    if ($oldEvidenceDeleted) {
-        foreach ($oldEvidence as $oldRow) {
-            $oldPath = $storageDir . DIRECTORY_SEPARATOR . basename((string)$oldRow['stored_filename']);
-            if (is_file($oldPath)) {
-                @unlink($oldPath);
-            }
-        }
-    }
 }
+
+if ($addedImages > 0) {
+    $updateLines[] = "Added {$addedImages} photo" . ($addedImages === 1 ? '' : 's') . '.';
+}
+if ($addedVideo) {
+    $updateLines[] = 'Added a video.';
+}
+if ($removedFiles) {
+    $removedCount = count($removedFiles);
+    $updateLines[] = "Removed {$removedCount} earlier file" . ($removedCount === 1 ? '' : 's') . '.';
+}
+$evidenceCount = $addedImages + ($addedVideo ? 1 : 0);
 
 // 5. Log Timeline Event
 $timelineTitle = $transitionedToReview
     ? 'Resident submitted additional info & documents'
     : 'Resident updated case details';
 
-$timelineDetails = '';
-if ($additionalInfo !== '') {
-    $timelineDetails = 'Details provided: ' . mb_substr($additionalInfo, 0, 160);
-}
-if ($evidenceCount > 0) {
-    $timelineDetails .= ($timelineDetails !== '' ? ' | ' : '') . "Uploaded {$evidenceCount} new evidence item(s).";
-}
-if ($timelineDetails === '') {
-    $timelineDetails = 'Resident submitted updates to the case file.';
-}
+$timelineDetails = $updateLines ? implode("\n", $updateLines) : 'Resident submitted updates to the case file.';
 
 $newKpStatus = $transitionedToReview ? 'under_review' : $currentKpStatus;
 
@@ -295,6 +292,13 @@ if ($tlStmt) {
 }
 
 $conn->commit();
+
+foreach ($removedFiles as $storedName) {
+    $oldPath = $storageDir . DIRECTORY_SEPARATOR . basename((string)$storedName);
+    if (is_file($oldPath)) {
+        @unlink($oldPath);
+    }
+}
 
 api_success([
     'message' => 'Additional information and details submitted successfully. Your case is now under review.',

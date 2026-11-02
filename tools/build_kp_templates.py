@@ -242,7 +242,10 @@ FORMS = {
         para("[ ${chk_violence} ]\tViolence. (State details) ${details_violence}", jc="both", left=1080, first=-720, after=80),
         para("[ ${chk_intimidation} ]\tIntimidation. (State details) ${details_intimidation}", jc="both", left=1080, first=-720, after=120),
         body_p("This ${sworn_day} day of ${sworn_month}, ${sworn_year}."),
-        *party_signatures(left_name="${repudiating_complainant}", right_name="${repudiating_respondent}"),
+        # Only the party who repudiates signs, so only that party's block is printed.
+        blank(), para("**${repudiating_role}:**", jc="left"), blank(),
+        para("____________________________", jc="left", keep_next=True),
+        para("${repudiating_party}", jc="left"),
         blank(),
         body_p("SUBSCRIBED AND SWORN TO before me this ${sworn_day} day of ${sworn_month}, ${sworn_year} at ${place}."),
         *signature("${presiding_name}", "${presiding_title}"),

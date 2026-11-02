@@ -44,6 +44,22 @@ if ($statusFilter !== '' && $statusColumn) {
     $values[] = $statusFilter;
 }
 
+// Resident app filter: a group of KP statuses ("ongoing" is every status not in another group).
+$statusGroups = [
+    'action_needed' => ['additional_info_required'],
+    'under_review'  => ['', 'filed', 'under_review'],
+    'resolved'      => ['mediation_settled', 'conciliation_settled', 'arbitration_awarded', 'settlement_repudiation', 'settlement_final',
+                        'compliance_monitoring', 'execution_pending', 'execution_completed', 'closed', 'certified_to_court', 'dismissed'],
+    'not_covered'   => ['not_eligible', 'referred'],
+];
+$groupFilter = trim((string)($_GET['group'] ?? ''));
+if ($groupFilter === 'ongoing' || isset($statusGroups[$groupFilter])) {
+    $groupStatuses = $groupFilter === 'ongoing' ? array_merge(...array_values($statusGroups)) : $statusGroups[$groupFilter];
+    $whereParts[] = 'COALESCE(kp_status, \'\') ' . ($groupFilter === 'ongoing' ? 'NOT IN' : 'IN') . ' (' . implode(',', array_fill(0, count($groupStatuses), '?')) . ')';
+    $types .= str_repeat('s', count($groupStatuses));
+    $values = array_merge($values, $groupStatuses);
+}
+
 $whereSql = $whereParts ? ('WHERE ' . implode(' AND ', $whereParts)) : '';
 
 $countStmt = $conn->prepare('SELECT COUNT(*) AS total FROM cases ' . $whereSql);
@@ -108,10 +124,33 @@ if ($result) {
         $kpStage = $kpInfo['stage'] ?? 'intake';
         $kpStageLabel = $kpStages[$kpStage]['label'] ?? ucfirst($kpStage);
         $kpStatusLabel = $kpInfo['label'] ?? ucfirst(str_replace('_', ' ', $rawKpStatus));
+        // Resident updates (resubmissions), oldest first
         $residentUpdates = [];
-        $descriptionText = (string)($row['description'] ?? '');
-        if (preg_match_all('/\[Resident Update - [^\]]+\]:\s*(.*?)(?=\R\R\[Resident Update - |\z)/s', $descriptionText, $matches)) {
-            $residentUpdates = array_values(array_filter(array_map('trim', $matches[1])));
+        if ($cRowId > 0) {
+            $ruStmt = $conn->prepare("SELECT details, event_at FROM kp_timeline_events WHERE case_id = ? AND event_type = 'resident_update' ORDER BY id ASC");
+            if ($ruStmt) {
+                $ruStmt->bind_param('i', $cRowId);
+                $ruStmt->execute();
+                foreach ($ruStmt->get_result()->fetch_all(MYSQLI_ASSOC) as $ruRow) {
+                    $residentUpdates[] = [
+                        'details' => kp_resident_update_text((string)($ruRow['details'] ?? '')),
+                        'event_at' => api_iso_timestamp($ruRow['event_at'] ?? null),
+                    ];
+                }
+                $ruStmt->close();
+            }
+        }
+
+        // Referral of a complaint not covered by KP
+        $referral = null;
+        if ($cRowId > 0 && ($row['kp_disposition'] ?? '') === 'not_covered') {
+            $rfStmt = $conn->prepare("SELECT details, destination FROM kp_referrals WHERE case_id = ? ORDER BY id DESC LIMIT 1");
+            if ($rfStmt) {
+                $rfStmt->bind_param('i', $cRowId);
+                $rfStmt->execute();
+                $referral = $rfStmt->get_result()->fetch_assoc();
+                $rfStmt->close();
+            }
         }
 
         // Latest review details
@@ -152,8 +191,10 @@ if ($result) {
 
         // Next scheduled hearing
         $nextHearing = null;
-        if ($cRowId > 0) {
-            $hStmt = $conn->prepare("SELECT stage, hearing_date, hearing_time, location FROM kp_hearings WHERE case_id = ? AND hearing_date >= CURDATE() AND (outcome IS NULL OR outcome = '') ORDER BY hearing_date ASC LIMIT 1");
+        // A finished case has no upcoming hearing, even if one was left without an outcome.
+        $finishedStatuses = ['not_eligible', 'referred', 'certified_to_court', 'dismissed', 'closed', 'execution_completed'];
+        if ($cRowId > 0 && !in_array($rawKpStatus, $finishedStatuses, true)) {
+            $hStmt = $conn->prepare("SELECT stage, purpose_type, purpose, hearing_date, hearing_time, location FROM kp_hearings WHERE case_id = ? AND hearing_date >= CURDATE() AND (outcome IS NULL OR outcome = '') ORDER BY hearing_date ASC LIMIT 1");
             if ($hStmt) {
                 $hStmt->bind_param('i', $cRowId);
                 $hStmt->execute();
@@ -163,12 +204,37 @@ if ($result) {
                         'stage' => (string)($hRow['stage'] ?? ''),
                         'date' => (string)$hRow['hearing_date'],
                         'time' => (string)($hRow['hearing_time'] ?? ''),
+                        'purpose' => (string)($hRow['purpose'] ?? ''),
+                        'purpose_type' => (string)($hRow['purpose_type'] ?? 'regular'),
                         'location' => (string)($hRow['location'] ?? ''),
                     ];
                 }
                 $hStmt->close();
             }
         }
+
+        // Plain-language meaning of the status; a dismissal names the stage the absence happened in.
+        $messageStage = $kpStage;
+        if (($row['kp_disposition'] ?? '') === 'barred_complainant_absent' && $cRowId > 0) {
+            $absence = $conn->query("SELECT stage FROM kp_hearings WHERE case_id = {$cRowId} AND purpose_type = 'explanation_complainant' ORDER BY id DESC LIMIT 1")->fetch_assoc();
+            $messageStage = (string)($absence['stage'] ?? 'mediation');
+        }
+        $messageContext = [];
+        if ($rawKpStatus === 'pangkat_constitution' && $cRowId > 0) {
+            $roleNames = ['chairman' => 'Chairman', 'secretary' => 'Secretary'];
+            $names = [];
+            foreach ($conn->query("SELECT member_name, role FROM kp_pangkat WHERE case_id = {$cRowId} ORDER BY id ASC")->fetch_all(MYSQLI_ASSOC) as $pm) {
+                $names[] = $pm['member_name'] . (isset($roleNames[$pm['role']]) ? " ({$roleNames[$pm['role']]})" : '');
+            }
+            $messageContext['pangkat_members'] = count($names) > 1
+                ? implode(', ', array_slice($names, 0, -1)) . ' and ' . end($names)
+                : implode('', $names);
+            $lastMediation = $conn->query("SELECT outcome FROM kp_hearings WHERE case_id = {$cRowId} AND stage = 'mediation' AND purpose_type = 'regular' AND outcome IS NOT NULL ORDER BY id DESC LIMIT 1")->fetch_assoc();
+            $messageContext['mediation_outcome'] = str_starts_with((string)($lastMediation['outcome'] ?? ''), 'Respondent absent') ? 'respondent_absent' : '';
+        }
+        $statusMessage = function_exists('kp_resident_status_message')
+            ? kp_resident_status_message($rawKpStatus, (string)($row['kp_disposition'] ?? ''), $messageStage, $messageContext)
+            : '';
 
         // Evidence files
         $evidence = $cRowId > 0 ? api_case_evidence($conn, $cRowId) : [];
@@ -189,10 +255,13 @@ if ($result) {
             'kp_status_label' => $kpStatusLabel,
             'kp_stage' => $kpStage,
             'kp_stage_label' => $kpStageLabel,
+            'status_message' => $statusMessage,
             'kp_disposition' => (string)($row['kp_disposition'] ?? ''),
             'kp_disposition_label' => function_exists('kp_case_outcome_label') ? kp_case_outcome_label($conn, $cRowId, (string)($row['kp_disposition'] ?? '')) : '',
             'review_decision' => (string)($review['decision'] ?? ''),
             'review_notes' => (string)($review['notes'] ?? ''),
+            'referral_destination' => (string)($referral['destination'] ?? ''),
+            'referral_details' => (string)($referral['details'] ?? ''),
             'missing_items' => (string)($review['missing_items'] ?? ''),
             'timeline' => $timeline,
             'next_hearing' => $nextHearing,

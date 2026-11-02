@@ -171,7 +171,7 @@ $evidence = [];
 if ($case) {
     $cid = (int)$case['id'];
     $cCode = (string)($case['case_id'] ?? '');
-    $evStmt = $conn->prepare("SELECT id, evidence_type, original_filename, mime_type, file_size FROM api_case_evidence WHERE case_id = ? OR case_id = ? ORDER BY id ASC");
+    $evStmt = $conn->prepare("SELECT id, evidence_type, original_filename, mime_type, file_size, created_at FROM api_case_evidence WHERE case_id = ? OR case_id = ? ORDER BY id ASC");
     if ($evStmt) {
         $evStmt->bind_param('is', $cid, $cCode);
         $evStmt->execute();
@@ -194,6 +194,22 @@ if ($case) {
 
 // ── Arbitration agreements, repudiations and derived proceeding state ──
 $caseContext = $case ? kp_load_case_context($conn, (int)$case['id']) : [];
+
+// ── Service of summons already recorded (Officer's Return) ──
+$serviceAttempts = [];
+if ($case) {
+    $sv = $conn->prepare("SELECT hearing_id, service_method, served_date, received_by FROM kp_service_attempts WHERE case_id = ? ORDER BY id ASC");
+    $sv->bind_param('i', $case['id']);
+    $sv->execute();
+    $serviceAttempts = $sv->get_result()->fetch_all(MYSQLI_ASSOC);
+    $sv->close();
+}
+$serviceMethodLabels = [
+    'personal'         => 'handed to the respondent in person',
+    'refused'          => 'tendered in person but refused',
+    'left_at_dwelling' => 'left at the dwelling',
+    'left_at_office'   => 'left at the office/place of business',
+];
 $agreements   = $caseContext['agreements'] ?? [];
 $repudiations = $caseContext['repudiations'] ?? [];
 $today        = date('Y-m-d');
@@ -239,9 +255,10 @@ $partyRoleOptions = static function () use ($case): string {
 };
 
 /**
- * Render a list of hearings with an outcome selector for unresolved ones.
+ * Render a list of hearings. A hearing still waiting for its outcome gets a
+ * set of outcome cards that explain what each outcome leads to.
  *
- * @param array<string, string> $outcomes outcome key => label
+ * @param array<string, string|array{0: string, 1: string}> $outcomes outcome key => label, or [label, what happens next]
  */
 function kp_render_hearings(array $list, int $caseId, string $stage, array $outcomes, bool $canRecord): void
 {
@@ -251,31 +268,201 @@ function kp_render_hearings(array $list, int $caseId, string $stage, array $outc
     echo '<div class="kp-hearing-list">';
     foreach ($list as $hearing) {
         $ts = strtotime((string)$hearing['hearing_date']);
-        echo '<div class="kp-hearing-item">';
+        $pending = empty($hearing['outcome']);
+        echo '<div class="kp-hearing-item' . ($pending && $canRecord ? ' kp-hearing-pending' : '') . '">';
         echo '<div class="kp-hearing-date-badge"><span class="kp-hb-day">' . date('d', $ts) . '</span><span class="kp-hb-month">' . date('M', $ts) . '</span></div>';
         echo '<div class="kp-hearing-info">';
         echo '<div class="kp-hearing-title">' . htmlspecialchars((string)($hearing['purpose'] ?: ucfirst($stage) . ' Hearing')) . '</div>';
         echo '<div class="kp-hearing-meta"><span><i class="uil uil-clock"></i> ' . ($hearing['hearing_time'] ? date('h:i A', strtotime((string)$hearing['hearing_time'])) : 'TBD') . '</span>';
         echo '<span><i class="uil uil-map-marker"></i> ' . htmlspecialchars((string)($hearing['location'] ?: 'Barangay Hall')) . '</span></div>';
-        if (!empty($hearing['outcome'])) {
+        if (!$pending) {
             echo '<div class="kp-hearing-outcome"><strong>Outcome:</strong> ' . htmlspecialchars((string)$hearing['outcome']) . '</div>';
+        } elseif ($canRecord) {
+            echo '<span class="kp-hearing-waiting"><i class="uil uil-hourglass"></i> Waiting for outcome</span>';
         }
         echo '</div>';
-        if (empty($hearing['outcome']) && $canRecord) {
-            echo '<div class="kp-hearing-actions"><form method="POST" action="kp_hearing.php" style="display:inline;">';
+        if ($pending && $canRecord) {
+            echo '<form method="POST" action="kp_hearing.php" class="kp-outcome-form">';
             echo '<input type="hidden" name="case_id" value="' . $caseId . '">';
             echo '<input type="hidden" name="stage" value="' . htmlspecialchars($stage) . '">';
             echo '<input type="hidden" name="hearing_id" value="' . (int)$hearing['id'] . '">';
-            echo '<select name="outcome" class="kp-select-sm" required><option value="">Outcome...</option>';
-            foreach ($outcomes as $key => $label) {
-                echo '<option value="' . htmlspecialchars($key) . '">' . htmlspecialchars($label) . '</option>';
+            echo '<div class="kp-outcome-heading">What happened at this hearing?</div>';
+            echo '<div class="kp-outcome-grid">';
+            foreach ($outcomes as $key => $option) {
+                [$label, $hint] = is_array($option) ? $option : [$option, ''];
+                echo '<label class="kp-outcome-opt"><input type="radio" name="outcome" value="' . htmlspecialchars($key) . '" data-label="' . htmlspecialchars($label) . '" required>';
+                echo '<span class="kp-outcome-card"><strong>' . htmlspecialchars($label) . '</strong>';
+                if ($hint !== '') {
+                    echo '<small>' . $hint . '</small>';
+                }
+                echo '</span></label>';
             }
-            echo '</select> <button type="submit" name="action" value="record_outcome" class="kp-btn kp-btn-sm" title="Save outcome"><i class="uil uil-save"></i></button>';
-            echo '</form></div>';
+            echo '</div>';
+            echo '<div class="kp-form-actions"><button type="submit" name="action" value="record_outcome" class="kp-btn kp-btn-primary"><i class="uil uil-save"></i> Record Outcome</button></div>';
+            echo '</form>';
         }
         echo '</div>';
     }
     echo '</div>';
+}
+
+/**
+ * The KP forms that go with the current step, so staff know what to print.
+ * Forms already generated can be downloaded; the rest can be generated here.
+ *
+ * @param int[] $forms     forms that belong to this step, in order
+ * @param int[] $available forms the case may generate now (kp_available_forms)
+ */
+function kp_render_step_forms(array $forms, array $available, array $documents, int $caseId, string $tab, array $pangkat = [], array $upcoming = []): void
+{
+    $forms = array_values(array_filter($forms, fn($fn) => in_array($fn, $available, true)));
+    // Forms of this step that open later, shown greyed with when they become available.
+    $upcoming = array_filter($upcoming, fn($fn) => !in_array($fn, $available, true), ARRAY_FILTER_USE_KEY);
+    if (!$forms && !$upcoming) {
+        return;
+    }
+    $latest = [];
+    foreach ($documents as $doc) {
+        $fn = (int)$doc['form_number'];
+        if (!isset($latest[$fn]) && !empty($doc['file_path']) && file_exists($doc['file_path'])) {
+            $latest[$fn] = $doc;
+        }
+    }
+    echo '<div class="kp-step-forms"><div class="kp-step-forms-title"><i class="uil uil-file-download-alt"></i> Forms for this step</div><div class="kp-step-forms-list">';
+    foreach ($forms as $fn) {
+        $info = kp_form_info($fn);
+        if (!$info) {
+            continue;
+        }
+        if ($fn === 11 && $pangkat) {
+            // KP Form 11 goes to each chosen member separately.
+            foreach ($pangkat as $member) {
+                $memberDoc = null;
+                foreach ($documents as $doc) {
+                    $input = json_decode((string)($doc['input_json'] ?? ''), true) ?: [];
+                    if ((int)$doc['form_number'] === 11 && (int)($input['pangkat_member_id'] ?? 0) === (int)$member['id']
+                        && !empty($doc['file_path']) && file_exists($doc['file_path'])) {
+                        $memberDoc = $doc;
+                        break;
+                    }
+                }
+                echo '<div class="kp-step-form"><div><strong>KP Form #11</strong><span>' . htmlspecialchars($info['title']) . ': ' . htmlspecialchars($member['member_name']) . '</span></div><div class="kp-step-form-actions">';
+                if ($memberDoc) {
+                    echo '<a href="kp_download.php?doc_id=' . (int)$memberDoc['id'] . '" class="kp-btn kp-btn-sm kp-btn-outline"><i class="uil uil-download-alt"></i> Download v' . (int)($memberDoc['version_number'] ?? 1) . '</a>';
+                }
+                echo '<form method="POST" action="kp_document.php" style="display:inline;"><input type="hidden" name="case_id" value="' . $caseId . '"><input type="hidden" name="form_number" value="11"><input type="hidden" name="pangkat_member_id" value="' . (int)$member['id'] . '"><input type="hidden" name="return_tab" value="' . htmlspecialchars($tab) . '">';
+                echo '<button type="submit" name="action" value="generate" class="kp-btn kp-btn-sm' . ($memberDoc ? '' : ' kp-btn-primary') . '"><i class="uil uil-file-alt"></i> ' . ($memberDoc ? 'New version' : 'Generate') . '</button></form>';
+                echo '</div></div>';
+            }
+            continue;
+        }
+        echo '<div class="kp-step-form"><div><strong>KP Form #' . htmlspecialchars(kp_form_label($fn)) . '</strong><span>' . htmlspecialchars($info['title']) . '</span></div><div class="kp-step-form-actions">';
+        if (isset($latest[$fn])) {
+            echo '<a href="kp_download.php?doc_id=' . (int)$latest[$fn]['id'] . '" class="kp-btn kp-btn-sm kp-btn-outline"><i class="uil uil-download-alt"></i> Download v' . (int)($latest[$fn]['version_number'] ?? 1) . '</a>';
+        }
+        if ($fn === 13) {
+            // The subpoena needs a witness name, entered in the Documents tab.
+            echo '<button type="button" class="kp-btn kp-btn-sm" onclick="switchTab(\'documents\')"><i class="uil uil-file-alt"></i> Open in Documents</button>';
+        } else {
+            echo '<form method="POST" action="kp_document.php" style="display:inline;"><input type="hidden" name="case_id" value="' . $caseId . '"><input type="hidden" name="form_number" value="' . $fn . '"><input type="hidden" name="return_tab" value="' . htmlspecialchars($tab) . '">';
+            echo '<button type="submit" name="action" value="generate" class="kp-btn kp-btn-sm' . (isset($latest[$fn]) ? '' : ' kp-btn-primary') . '"><i class="uil uil-file-alt"></i> ' . (isset($latest[$fn]) ? 'New version' : 'Generate') . '</button></form>';
+        }
+        echo '</div></div>';
+    }
+    foreach ($upcoming as $fn => $when) {
+        $info = kp_form_info($fn);
+        if ($info) {
+            echo '<div class="kp-step-form kp-step-form-later"><div><strong>KP Form #' . htmlspecialchars(kp_form_label($fn)) . '</strong><span>' . htmlspecialchars($info['title']) . '</span></div>'
+                . '<div class="kp-step-form-when"><i class="uil uil-clock"></i> ' . htmlspecialchars($when) . '</div></div>';
+        }
+    }
+    echo '</div></div>';
+}
+
+/**
+ * Hearings of one stage: the hearing waiting for its outcome first, then the
+ * finished ones (newest first) folded away so the tab stays tidy.
+ *
+ * @param array<int, array{0: array, 1: array, 2: bool}> $groups [hearings, outcome options, can record]
+ */
+function kp_render_hearing_groups(array $groups, int $caseId, string $stage): void
+{
+    $pending = [];
+    $past = [];
+    foreach ($groups as [$list, $outcomes, $canRecord]) {
+        foreach ($list as $hearing) {
+            if (empty($hearing['outcome'])) {
+                $pending[] = [$hearing, $outcomes, $canRecord];
+            } else {
+                $past[] = $hearing;
+            }
+        }
+    }
+    if ($pending) {
+        echo '<h4 class="kp-sub-title">Current Hearing</h4>';
+        foreach ($pending as [$hearing, $outcomes, $canRecord]) {
+            kp_render_hearings([$hearing], $caseId, $stage, $outcomes, $canRecord);
+        }
+    }
+    if ($past) {
+        usort($past, fn($a, $b) => [$b['hearing_date'], (int)$b['id']] <=> [$a['hearing_date'], (int)$a['id']]);
+        echo '<details class="kp-past-hearings"><summary><i class="uil uil-history"></i> Past hearings (' . count($past) . ')<span>newest first</span></summary>';
+        kp_render_hearings($past, $caseId, $stage, [], false);
+        echo '</details>';
+    }
+}
+
+/**
+ * Shown in a stage tab once the case has moved past it: where the case is now
+ * and a button to the tab where it continues.
+ */
+function kp_render_moved_on(string $tab, ?array $nextStep, string $statusLabel): void
+{
+    if (!$nextStep || $nextStep[0] === $tab) {
+        return;
+    }
+    echo '<div class="kp-info-box kp-moved-on"><i class="uil uil-arrow-circle-right"></i><div><strong>This step is finished</strong>'
+        . '<p>The case is now: <strong>' . htmlspecialchars($statusLabel) . '</strong>.</p></div></div>';
+}
+
+/**
+ * One entry of the Review History timeline: a barangay review decision or a
+ * reply from the resident (with the files sent with it).
+ */
+function kp_render_review_entry(array $entry): void
+{
+    $row = $entry['row'];
+    $resident = $entry['type'] === 'resident';
+    if ($resident) {
+        $title = 'Resident sent additional information';
+        $icon = 'uil-user';
+        $body = kp_resident_update_text((string)($row['details'] ?? ''));
+    } else {
+        $decision = (string)$row['decision'];
+        $title = kp_status_label($decision);
+        $icon = ['accepted' => 'uil-check-circle', 'additional_info_required' => 'uil-exclamation-circle', 'not_eligible' => 'uil-times-circle', 'referred' => 'uil-share'][$decision] ?? 'uil-clipboard-notes';
+        $body = trim((string)($row['notes'] ?? ''));
+    }
+    echo '<li class="kp-rh-item ' . ($resident ? 'kp-rh-resident' : 'kp-rh-barangay') . '">';
+    echo '<span class="kp-rh-dot"><i class="uil ' . $icon . '"></i></span><div class="kp-rh-body">';
+    echo '<div class="kp-rh-head"><strong>' . htmlspecialchars($title) . '</strong><span class="kp-rh-who">' . ($resident ? 'Resident' : 'Barangay') . '</span>'
+        . '<time>' . date('M d, Y · h:i A', $entry['at']) . '</time></div>';
+    if (!$resident && trim((string)($row['missing_items'] ?? '')) !== '') {
+        echo '<div class="kp-rh-required"><strong>Requested:</strong> ' . nl2br(htmlspecialchars(trim((string)$row['missing_items']))) . '</div>';
+    }
+    if ($body !== '') {
+        echo '<div class="kp-rh-text">' . nl2br(htmlspecialchars($body)) . '</div>';
+    }
+    if ($entry['files']) {
+        echo '<div class="kp-rh-files">';
+        foreach ($entry['files'] as $file) {
+            $isVideo = strtolower((string)$file['evidence_type']) === 'video';
+            echo '<a href="../api/v1/case_evidence.php?id=' . (int)$file['id'] . '" target="_blank" rel="noopener" title="' . htmlspecialchars((string)$file['original_filename']) . '">'
+                . '<i class="uil uil-' . ($isVideo ? 'video' : 'image') . '"></i><span>' . htmlspecialchars((string)$file['original_filename']) . '</span></a>';
+        }
+        echo '</div>';
+    }
+    echo '</div></li>';
 }
 
 /** Render the date/time/location fields of a hearing scheduling form. */
@@ -313,6 +500,17 @@ if ($case) {
     }
 }
 
+// A stage has a hearing still waiting for its outcome: no new hearing is scheduled until then.
+$kpPendingHearing = static function (string $stage) use ($hearings): ?array {
+    foreach (kp_filter_hearings($hearings, $stage) as $h) {
+        if (empty($h['outcome'])) {
+            return $h;
+        }
+    }
+    return null;
+};
+$stepFormsAvailable = ($case && empty($case['archived_at'])) ? kp_available_forms($case, $caseContext) : [];
+
 $caseDisplayId = $case['case_id'] ?? ('C-' . str_pad((string)($case['id'] ?? 0), 4, '0', STR_PAD_LEFT));
 $dateTs = strtotime($case['date_submitted'] ?? '');
 $dateDisplay = $dateTs ? date('M d, Y h:i A', $dateTs) : 'N/A';
@@ -335,6 +533,7 @@ $actionError = [
     'invalid_outcome'           => 'Please choose a valid outcome for this hearing.',
     'pangkat_required'          => 'Constitute the Pangkat ng Tagapagkasundo first.',
     'pangkat_incomplete'        => 'Enter all three Pangkat members and how each was chosen.',
+    'meeting_required'          => 'Schedule the constitution meeting first. The Pangkat members are chosen at that meeting.',
     'pangkat_officers'          => 'Select a Chairman and a different Secretary from among the three members.',
     'agreement_required'        => 'Record the Agreement for Arbitration first.',
     'agreement_window_open'     => 'The arbitration hearing can only be held after the 5-day period to repudiate the agreement has ended.',
@@ -346,8 +545,101 @@ $actionError = [
     'execution_period_lapsed'   => 'More than 6 months have passed since the settlement; it can no longer be executed by the Lupon.',
     'execution_hearing_date'    => 'The hearing on the motion must be set no later than 5 days after the motion was filed.',
     'compliance_period_open'    => 'The Notice of Execution may only be issued after the 5-day voluntary compliance period.',
+    'hearing_pending'           => 'Record the outcome of the scheduled hearing first. A new hearing can be set once it is adjourned.',
     'extension_not_allowed'     => 'The conciliation period can be extended only once, with a stated reason.',
 ][(string)($_GET['kp_error'] ?? '')] ?? '';
+$generatedForm = (int)($_GET['generated'] ?? 0);
+$successMessage = match (true) {
+    $generatedForm > 0           => 'KP Form #' . kp_form_label($generatedForm) . ' was generated.',
+    isset($_GET['scheduled'])    => 'Hearing scheduled. Generate its notices under "Forms for this step" in this tab.',
+    isset($_GET['outcome'])      => 'Outcome recorded.',
+    isset($_GET['reviewed'])     => $kpStatus === 'accepted' ? 'Case accepted for KP processing.' : 'Review saved.',
+    isset($_GET['pangkat'])      => 'Pangkat saved. Generate the notice to each chosen member (KP Form #11).',
+    ($_GET['saved'] ?? '') === 'service' => 'Service of summons recorded. You can now generate the Officer\'s Return (KP Form #9-A).',
+    isset($_GET['saved'])        => 'Saved.',
+    default                      => '',
+};
+
+// Where the case continues next, so staff are pointed to the right tab: [tab, button text].
+$kpNextStep = match (true) {
+    in_array($kpStatus, ['filed', 'under_review'], true)                     => ['review', 'Review the complaint'],
+    $kpStatus === 'accepted'                                                 => ['mediation', 'Go to Mediation: schedule the hearing'],
+    in_array($kpStatus, ['mediation_scheduled', 'mediation_ongoing', 'mediation_noshow_complainant'], true) => ['mediation', 'Go to Mediation'],
+    in_array($kpStatus, ['mediation_settled', 'conciliation_settled'], true) => ['settlement', 'Go to Settlement: record the terms'],
+    $kpStatus === 'pangkat_constitution' && $hasPangkat                      => ['conciliation', 'Go to Conciliation: schedule the first hearing'],
+    $kpStatus === 'pangkat_constitution'                                     => ['pangkat', 'Go to Pangkat: constitute the Pangkat'],
+    in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing', 'conciliation_noshow_complainant', 'conciliation_noshow_respondent'], true) => ['conciliation', 'Go to Conciliation'],
+    str_starts_with($kpStatus, 'arbitration_')                               => ['arbitration', 'Go to Arbitration'],
+    $kpStatus === 'settlement_repudiation'                                   => ['settlement', 'Go to Settlement & Finality'],
+    $kpStatus === 'settlement_final'                                         => ['compliance', 'Go to Compliance: begin monitoring'],
+    $kpStatus === 'compliance_monitoring'                                    => ['compliance', 'Go to Compliance'],
+    str_starts_with($kpStatus, 'execution_')                                 => ['execution', 'Go to Execution'],
+    in_array($kpStatus, ['certified_to_court', 'dismissed', 'closed'], true) => ['disposition', 'View the Disposition'],
+    default                                                                  => null,
+};
+
+// The one thing to do next, shown in the bar under the tabs: [tab, text].
+$kpNext = null;
+if ($case && empty($case['archived_at'])) {
+    $pendingOf = static fn(string $stage, string $type) => array_values(array_filter(kp_filter_hearings($hearings, $stage, $type), fn($h) => empty($h['outcome'])))[0] ?? null;
+    $whenText = static fn(?array $h) => $h ? date('M d, Y', strtotime($h['hearing_date'])) . ($h['hearing_time'] ? ' at ' . date('h:i A', strtotime($h['hearing_time'])) : '') : '';
+    $nonComplianceNoted = false;
+    foreach ($timeline as $evt) {
+        if (($evt['event_type'] ?? '') === 'compliance_update') {
+            $nonComplianceNoted = ($evt['title'] ?? '') === 'Non-compliance noted';
+            break;
+        }
+    }
+    $stageHearingNext = static function (string $stage, string $label) use ($kpPendingHearing, $whenText): array {
+        $pending = $kpPendingHearing($stage);
+        return $pending
+            ? [$stage, 'Record what happened at the ' . $label . ' hearing on ' . $whenText($pending) . '.']
+            : [$stage, 'Schedule the next ' . $label . ' hearing.'];
+    };
+    $kpNext = match (true) {
+        in_array($kpStatus, ['filed', 'under_review'], true) => ['review', 'Review the complaint and decide whether to accept it for KP processing.'],
+        $kpStatus === 'additional_info_required' => ['review', "Wait for the resident's reply, then review the complaint again."],
+        $kpStatus === 'accepted' => ['mediation', 'Schedule the first mediation hearing.'],
+        in_array($kpStatus, ['mediation_scheduled', 'mediation_ongoing'], true) => $stageHearingNext('mediation', 'mediation'),
+        in_array($kpStatus, ['mediation_noshow_complainant', 'conciliation_noshow_complainant', 'conciliation_noshow_respondent'], true) => (function () use ($kpStatus, $pendingOf, $whenText) {
+            $stage = str_starts_with($kpStatus, 'mediation') ? 'mediation' : 'conciliation';
+            $party = str_ends_with($kpStatus, 'respondent') ? 'respondent' : 'complainant';
+            $pending = $pendingOf($stage, 'explanation_' . $party);
+            return $pending
+                ? [$stage, 'Record whether the ' . $party . "'s absence was justified (hearing on " . $whenText($pending) . ').']
+                : [$stage, 'Schedule a hearing for the ' . $party . ' to explain the absence.'];
+        })(),
+        $kpStatus === 'pangkat_constitution' && $hasPangkat => ['conciliation', 'Schedule the first conciliation hearing before the Pangkat.'],
+        $kpStatus === 'pangkat_constitution' => $pendingOf('conciliation', 'pangkat_constitution')
+            ? ['pangkat', 'Record the three members chosen at the constitution meeting.']
+            : ['pangkat', 'Schedule the meeting to constitute the Pangkat.'],
+        in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing'], true) => $stageHearingNext('conciliation', 'conciliation'),
+        in_array($kpStatus, ['mediation_settled', 'conciliation_settled'], true) => ['settlement', 'Record the terms of the amicable settlement (KP Form #16).'],
+        $kpStatus === 'arbitration_agreed' && $agreementWindowOpen && !KP_SKIP_WAITING_PERIODS => ['arbitration', 'Wait for the 5-day period to repudiate the agreement to end (' . date('M d, Y', strtotime($latestAgreement['repudiation_deadline'])) . '), then schedule the arbitration hearing.'],
+        $kpStatus === 'arbitration_agreed' => ['arbitration', 'Schedule the arbitration hearing.'],
+        $kpStatus === 'arbitration_hearing' => $kpPendingHearing('arbitration')
+            ? ['arbitration', 'Record what happened at the arbitration hearing on ' . $whenText($kpPendingHearing('arbitration')) . '.']
+            : ($lastAwardHearing ? ['arbitration', 'Record the arbitration award (KP Form #15).'] : ['arbitration', 'Schedule the next arbitration hearing.']),
+        in_array($kpStatus, ['arbitration_awarded', 'settlement_repudiation'], true) && $activeSettlement => kp_period_over($activeSettlement['repudiation_deadline'])
+            ? ['settlement', 'Confirm the ' . ($kpStatus === 'arbitration_awarded' ? 'award' : 'settlement') . ' as final and executory.']
+            : ['settlement', 'Wait until ' . date('M d, Y', strtotime($activeSettlement['repudiation_deadline'])) . ' (the 10-day period), then confirm finality.'],
+        $kpStatus === 'settlement_final' => ['compliance', 'Begin compliance monitoring.'],
+        $kpStatus === 'compliance_monitoring' && $nonComplianceNoted => ['execution', 'File the Motion for Execution (KP Form #23) for the party who asks for it.'],
+        $kpStatus === 'compliance_monitoring' => ['compliance', 'Record whether the parties complied with the settlement or award.'],
+        $kpStatus === 'execution_pending' && $latestExecution && empty($latestExecution['hearing_date']) => ['execution', 'Schedule the hearing on the motion for execution (KP Form #24).'],
+        $kpStatus === 'execution_pending' && $latestExecution && empty($latestExecution['execution_issued_at']) => ['execution', 'Record whether the obliged party complied, or issue the Notice of Execution (KP Form #25).'],
+        $kpStatus === 'execution_pending' => ['execution', 'Record that the execution was carried out.'],
+        $kpStatus === 'execution_completed' => ['execution', 'Close the case.'],
+        in_array($kpStatus, kp_terminal_statuses(), true) => ['disposition', 'The case is concluded. No further action is needed.'],
+        default => null,
+    };
+    // The "Go to …" buttons elsewhere follow the same next step.
+    if ($kpNext && $kpNextStep && $kpNext[0] !== $kpNextStep[0] && !in_array($kpStatus, kp_terminal_statuses(), true)) {
+        $kpNextStep = [$kpNext[0], 'Go to ' . ucfirst($kpNext[0])];
+    }
+}
+$kpTabNames = ['review' => 'Review', 'mediation' => 'Mediation', 'pangkat' => 'Pangkat', 'conciliation' => 'Conciliation', 'settlement' => 'Settlement',
+               'arbitration' => 'Arbitration', 'compliance' => 'Compliance', 'execution' => 'Execution', 'disposition' => 'Disposition'];
 ?>
 <?php include('../includes/header.php'); ?>
 <?php include('../includes/sidebar_barangay.php'); ?>
@@ -441,18 +733,29 @@ $actionError = [
             <span><?= htmlspecialchars($deadlineWarning) ?></span>
         </div>
         <?php endif; ?>
+        <div class="kp-toasts">
         <?php if ($generationError !== ''): ?>
-        <div class="kp-error-card" role="alert">
+        <div class="kp-error-card kp-toast" role="alert">
             <i class="uil uil-file-exclamation"></i>
             <div class="kp-error-title"><?= htmlspecialchars($generationError) ?></div>
+            <button type="button" class="kp-toast-close" aria-label="Close" onclick="this.closest('.kp-toast').remove()"><i class="uil uil-times"></i></button>
         </div>
         <?php endif; ?>
         <?php if ($actionError !== ''): ?>
-        <div class="kp-error-card" role="alert">
+        <div class="kp-error-card kp-toast" role="alert">
             <i class="uil uil-exclamation-circle"></i>
             <div class="kp-error-title"><?= htmlspecialchars($actionError) ?></div>
+            <button type="button" class="kp-toast-close" aria-label="Close" onclick="this.closest('.kp-toast').remove()"><i class="uil uil-times"></i></button>
         </div>
         <?php endif; ?>
+        <?php if ($successMessage !== '' && $generationError === '' && $actionError === ''): ?>
+        <div class="kp-success-banner kp-toast" role="status" data-autohide="1">
+            <i class="uil uil-check-circle"></i>
+            <span><?= htmlspecialchars($successMessage) ?></span>
+            <button type="button" class="kp-toast-close" aria-label="Close" onclick="this.closest('.kp-toast').remove()"><i class="uil uil-times"></i></button>
+        </div>
+        <?php endif; ?>
+        </div>
 
         <!-- ─── Stage Progress Bar ─── -->
         <div class="kp-stage-bar">
@@ -593,6 +896,12 @@ $actionError = [
             <!-- Right Panel: Tabbed Content -->
             <div class="kp-main-panel">
                 <!-- Tab Bar -->
+                <?php if (KP_SKIP_WAITING_PERIODS): ?>
+                <div class="kp-info-box" style="border-left: 3px solid #b45309; background:#fffbeb; margin-bottom:14px;">
+                    <i class="uil uil-presentation-play" style="color:#b45309"></i>
+                    <div><strong>Demo mode: legal waiting periods are skipped</strong><p>So the whole process can be shown at once, actions that normally wait 5 days, 10 days or 6 months are available right away. The live site follows the real periods.</p></div>
+                </div>
+                <?php endif; ?>
                 <div class="kp-tabs">
                     <button class="kp-tab active" data-tab="overview"><i class="uil uil-clipboard-alt"></i> Overview</button>
                     <button class="kp-tab" data-tab="review"><i class="uil uil-file-search-alt"></i> Review</button>
@@ -607,6 +916,16 @@ $actionError = [
                     <button class="kp-tab" data-tab="documents"><i class="uil uil-file-download-alt"></i> Documents</button>
                     <button class="kp-tab" data-tab="timeline"><i class="uil uil-clock-three"></i> Timeline</button>
                 </div>
+
+                <?php if ($kpNext): ?>
+                <div class="kp-next-bar<?= in_array($kpStatus, kp_terminal_statuses(), true) ? ' kp-next-done' : '' ?>" data-next-tab="<?= $kpNext[0] ?>">
+                    <i class="uil uil-<?= in_array($kpStatus, kp_terminal_statuses(), true) ? 'check-circle' : 'arrow-circle-right' ?>"></i>
+                    <div class="kp-next-text"><span>Next step<span class="kp-next-where" data-next-tab="<?= $kpNext[0] ?>" data-label="<?= $kpTabNames[$kpNext[0]] ?? '' ?>"> · <?= $kpTabNames[$kpNext[0]] ?? '' ?> tab</span></span><strong><?= htmlspecialchars($kpNext[1]) ?></strong></div>
+                    <?php if (!in_array($kpStatus, kp_terminal_statuses(), true)): ?>
+                    <button type="button" class="kp-btn kp-btn-primary kp-btn-sm kp-next-go" data-next-tab="<?= $kpNext[0] ?>" onclick="switchTab('<?= $kpNext[0] ?>'); this.closest('.kp-next-bar').scrollIntoView({behavior: 'smooth', block: 'start'});">Go to <?= $kpTabNames[$kpNext[0]] ?? '' ?> <i class="uil uil-arrow-right"></i></button>
+                    <?php endif; ?>
+                </div>
+                <?php endif; ?>
 
                 <!-- ═══ TAB: Overview ═══ -->
                 <div class="kp-tab-content <?= $requestedTab === 'overview' || $requestedTab === '' ? 'active' : '' ?>" id="tab-overview">
@@ -627,15 +946,12 @@ $actionError = [
                             <?php if ($kpStatus === 'filed'): ?>
                                 <p>This complaint has been filed and needs to be <strong>reviewed</strong>.</p>
                                 <p>Go to the <strong>Review</strong> tab to screen this complaint and decide whether to accept it for KP processing.</p>
-                                <button class="kp-next-action" onclick="switchTab('review')"><i class="uil uil-file-search-alt"></i> Go to Review Tab</button>
 
                             <?php elseif ($kpStatus === 'under_review'): ?>
                                 <p>This complaint is under review. Complete the review in the <strong>Review</strong> tab.</p>
-                                <button class="kp-next-action" onclick="switchTab('review')"><i class="uil uil-file-search-alt"></i> Complete Review</button>
 
                             <?php elseif ($kpStatus === 'additional_info_required'): ?>
                                 <p>Additional information was requested. Once received, go to the <strong>Review</strong> tab to update the decision.</p>
-                                <button class="kp-next-action" onclick="switchTab('review')"><i class="uil uil-file-search-alt"></i> Update Review</button>
 
                             <?php elseif ($kpStatus === 'accepted'): ?>
                                 <p>This complaint has been accepted for KP processing. Next steps:</p>
@@ -644,19 +960,13 @@ $actionError = [
                                     <li>Schedule the <strong>mediation hearing</strong> and issue the summons on the next working day after the complaint is received</li>
                                     <li>After scheduling, generate <strong>KP Form #8</strong> (Notice of Hearing) and <strong>KP Form #9</strong> (Summons)</li>
                                 </ol>
-                                <div class="kp-action-row">
-                                    <button class="kp-next-action" onclick="switchTab('documents')"><i class="uil uil-file-alt"></i> Generate Form #7</button>
-                                    <button class="kp-next-action" onclick="switchTab('mediation')"><i class="uil uil-balance-scale"></i> Schedule Mediation</button>
-                                </div>
 
                             <?php elseif (in_array($kpStatus, ['mediation_scheduled', 'mediation_ongoing'])): ?>
                                 <p>Mediation is <?= $kpStatus === 'mediation_scheduled' ? 'scheduled' : 'ongoing' ?>. Record each hearing's outcome in the <strong>Mediation</strong> tab: settled, adjourned, failed, or a party absent.</p>
                                 <p>If the parties agree in writing to arbitration, record it in the <strong>Arbitration</strong> tab.</p>
-                                <button class="kp-next-action" onclick="switchTab('mediation')"><i class="uil uil-balance-scale"></i> Go to Mediation</button>
 
                             <?php elseif ($kpStatus === 'mediation_settled' || $kpStatus === 'conciliation_settled'): ?>
                                 <p>The parties reached a settlement. Record the terms in the <strong>Settlement</strong> tab, then generate <strong>KP Form #16</strong>. The 10-day repudiation period starts on the settlement date.</p>
-                                <button class="kp-next-action" onclick="switchTab('settlement')"><i class="uil uil-file-check-alt"></i> Record Settlement</button>
 
                             <?php elseif (in_array($kpStatus, ['mediation_noshow_complainant', 'conciliation_noshow_complainant', 'conciliation_noshow_respondent'], true)): ?>
                                 <?php $absentParty = $kpStatus === 'conciliation_noshow_respondent' ? 'respondent' : 'complainant'; ?>
@@ -666,7 +976,6 @@ $actionError = [
                                 <?php else: ?>
                                 <p>If the absence is found unjustified, the complainant may file in court (KP Form #20-B) and the respondent's counterclaim is barred (KP Form #22).</p>
                                 <?php endif; ?>
-                                <button class="kp-next-action" onclick="switchTab('<?= kp_status_stage($kpStatus) ?>')"><i class="uil uil-calendar-alt"></i> Schedule Explanation Hearing</button>
 
                             <?php elseif ($kpStatus === 'pangkat_constitution'): ?>
                                 <p>Mediation failed. Within 15 days, call the parties to constitute the <strong>Pangkat ng Tagapagkasundo</strong>:</p>
@@ -675,19 +984,15 @@ $actionError = [
                                     <li>Record the 3 members chosen by the parties (or by drawing of lots) and the elected Chairman and Secretary</li>
                                     <li>Generate <strong>KP Form #11</strong> for each chosen member, then schedule conciliation — the Pangkat meets within 3 days of its constitution</li>
                                 </ol>
-                                <button class="kp-next-action" onclick="switchTab('pangkat')"><i class="uil uil-users-alt"></i> Go to Pangkat</button>
 
                             <?php elseif (in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing'])): ?>
                                 <p>Conciliation is <?= $kpStatus === 'conciliation_scheduled' ? 'scheduled' : 'ongoing' ?>. Record each hearing's outcome in the <strong>Conciliation</strong> tab and generate <strong>KP Form #12</strong> for each hearing.</p>
-                                <button class="kp-next-action" onclick="switchTab('conciliation')"><i class="uil uil-comments-alt"></i> Go to Conciliation</button>
 
                             <?php elseif ($kpStatus === 'arbitration_agreed'): ?>
                                 <p>The parties signed an Agreement for Arbitration (KP Form #14). Either party may repudiate it until <strong><?= $latestAgreement ? date('M d, Y', strtotime($latestAgreement['repudiation_deadline'])) : '—' ?></strong>. The arbitration hearing can be held after that date.</p>
-                                <button class="kp-next-action" onclick="switchTab('arbitration')"><i class="uil uil-user-check"></i> Go to Arbitration</button>
 
                             <?php elseif ($kpStatus === 'arbitration_hearing'): ?>
                                 <p>Arbitration hearings are in progress. Once the parties have presented their case, mark the hearing <strong>Submitted for award</strong>. The award (KP Form #15) is made after the 5-day period to repudiate the agreement and within 10 days thereafter.</p>
-                                <button class="kp-next-action" onclick="switchTab('arbitration')"><i class="uil uil-user-check"></i> Go to Arbitration</button>
 
                             <?php elseif ($kpStatus === 'arbitration_awarded' || $kpStatus === 'settlement_repudiation'): ?>
                                 <?php $periodEnd = $activeSettlement ? $activeSettlement['repudiation_deadline'] : null; ?>
@@ -697,23 +1002,18 @@ $actionError = [
                                 <p>The settlement was recorded. Either party may repudiate it by a sworn statement (KP Form #17) on the ground of fraud, violence or intimidation.</p>
                                 <?php endif; ?>
                                 <p>Period ends: <strong><?= $periodEnd ? date('M d, Y', strtotime($periodEnd)) : '—' ?></strong>. After that date, confirm finality in the <strong>Settlement</strong> tab.</p>
-                                <button class="kp-next-action" onclick="switchTab('settlement')"><i class="uil uil-file-check-alt"></i> Go to Settlement</button>
 
                             <?php elseif ($kpStatus === 'settlement_final'): ?>
                                 <p>The settlement/award is <strong>final and executory</strong>. Begin compliance monitoring.</p>
-                                <button class="kp-next-action" onclick="switchTab('compliance')"><i class="uil uil-check-circle"></i> Go to Compliance</button>
 
                             <?php elseif ($kpStatus === 'compliance_monitoring'): ?>
                                 <p>Monitor compliance. If the obliged party does not comply, the other party may file a Motion for Execution (KP Form #23) until <strong><?= $executionLimit ? date('M d, Y', strtotime($executionLimit)) : '—' ?></strong> (6 months from the settlement date).</p>
-                                <button class="kp-next-action" onclick="switchTab('compliance')"><i class="uil uil-check-circle"></i> Go to Compliance</button>
 
                             <?php elseif ($kpStatus === 'execution_pending'): ?>
                                 <p>A Motion for Execution was filed. Hear the motion within 5 days (KP Form #24). If there is no voluntary compliance within 5 days after the hearing, issue the Notice of Execution (KP Form #25).</p>
-                                <button class="kp-next-action" onclick="switchTab('execution')"><i class="uil uil-bolt"></i> Go to Execution</button>
 
                             <?php elseif ($kpStatus === 'execution_completed'): ?>
                                 <p>Execution is complete. Close the case in the <strong>Execution</strong> tab.</p>
-                                <button class="kp-next-action" onclick="switchTab('execution')"><i class="uil uil-bolt"></i> Go to Execution</button>
 
                             <?php elseif (in_array($kpStatus, kp_terminal_statuses(), true)): ?>
                                 <p>This case is <strong>concluded</strong>. No further action required.</p>
@@ -731,7 +1031,19 @@ $actionError = [
                     <?php if (!empty($case['description'])): ?>
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Complaint Narrative</h3>
-                        <div class="kp-narrative"><?= nl2br(htmlspecialchars($case['description'])) ?></div>
+                        <div class="kp-narrative"><?= preg_replace('/\[Resident Update - [^\]]+\]:/', '<mark class="kp-update-tag">$0</mark>', nl2br(htmlspecialchars($case['description']))) ?></div>
+                        <?php $residentUpdates = array_reverse(array_values(array_filter($timeline, fn($evt) => ($evt['event_type'] ?? '') === 'resident_update'))); ?>
+                        <?php if ($residentUpdates): ?>
+                        <div class="kp-resident-updates">
+                            <div class="kp-ru-title"><i class="uil uil-sync"></i> Resident Updates (<?= count($residentUpdates) ?>)</div>
+                            <?php foreach ($residentUpdates as $upd): ?>
+                            <div class="kp-ru-item">
+                                <div class="kp-ru-date">Resident Update &middot; <?= date('M d, Y h:i A', strtotime($upd['event_at'])) ?></div>
+                                <div class="kp-ru-text"><?= nl2br(htmlspecialchars(kp_resident_update_text((string)($upd['details'] ?? '')))) ?></div>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
                     <?php endif; ?>
 
@@ -830,25 +1142,38 @@ $actionError = [
                         </div>
                         <?php endif; ?>
 
-                        <!-- Review History -->
-                        <?php if (!empty($reviews)): ?>
-                        <h4 class="kp-sub-title">Review History</h4>
-                        <div class="kp-review-history">
-                            <?php foreach ($reviews as $rev): ?>
-                            <div class="kp-review-item">
-                                <div class="kp-review-decision">
-                                    <strong><?= htmlspecialchars(kp_status_label($rev['decision'])) ?></strong>
-                                    <span class="kp-review-date"><?= date('M d, Y h:i A', strtotime($rev['created_at'])) ?></span>
-                                </div>
-                                <?php if ($rev['notes']): ?>
-                                <div class="kp-review-notes"><?= nl2br(htmlspecialchars($rev['notes'])) ?></div>
-                                <?php endif; ?>
-                                <?php if ($rev['missing_items']): ?>
-                                <div class="kp-review-missing"><strong>Required:</strong> <?= nl2br(htmlspecialchars($rev['missing_items'])) ?></div>
-                                <?php endif; ?>
-                            </div>
-                            <?php endforeach; ?>
-                        </div>
+                        <!-- Review History: the barangay's decisions and the resident's replies, newest first -->
+                        <?php
+                            $reviewHistory = [];
+                            foreach ($reviews as $rev) {
+                                $reviewHistory[] = ['type' => 'review', 'at' => strtotime($rev['created_at']), 'row' => $rev, 'files' => []];
+                            }
+                            foreach ($timeline as $evt) {
+                                if (($evt['event_type'] ?? '') !== 'resident_update') {
+                                    continue;
+                                }
+                                $at = strtotime($evt['event_at']);
+                                // Files uploaded in the same request as this reply share its timestamp.
+                                $files = array_values(array_filter($evidence, fn($ev) => !empty($ev['created_at']) && abs(strtotime($ev['created_at']) - $at) <= 2));
+                                $reviewHistory[] = ['type' => 'resident', 'at' => $at, 'row' => $evt, 'files' => $files];
+                            }
+                            usort($reviewHistory, fn($a, $b) => $b['at'] <=> $a['at']);
+                            $reviewRecent = array_slice($reviewHistory, 0, 3);
+                            $reviewOlder  = array_slice($reviewHistory, 3);
+                        ?>
+                        <?php if ($reviewHistory): ?>
+                        <h4 class="kp-sub-title">Review History <span class="kp-rh-count"><?= count($reviewHistory) ?></span></h4>
+                        <ol class="kp-rh">
+                            <?php foreach ($reviewRecent as $entry) { kp_render_review_entry($entry); } ?>
+                        </ol>
+                        <?php if ($reviewOlder): ?>
+                        <details class="kp-rh-more">
+                            <summary>Show <?= count($reviewOlder) ?> older <?= count($reviewOlder) === 1 ? 'entry' : 'entries' ?></summary>
+                            <ol class="kp-rh">
+                                <?php foreach ($reviewOlder as $entry) { kp_render_review_entry($entry); } ?>
+                            </ol>
+                        </details>
+                        <?php endif; ?>
                         <?php endif; ?>
                     </div>
                 </div>
@@ -858,8 +1183,18 @@ $actionError = [
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Mediation</h3>
 
-                        <?php if (in_array($kpStatus, ['accepted', 'mediation_scheduled', 'mediation_ongoing'])): ?>
-                        <p class="kp-section-desc">Schedule and manage mediation hearings before the Punong Barangay. The summons (KP Form #9) and the notice to the complainant (KP Form #8) are issued on the next working day after the complaint is received.</p>
+                        <?php kp_render_step_forms([7, 8, 9, 91, 13, 18], $stepFormsAvailable, $documents, (int)$case['id'], 'mediation', [],
+                            in_array($kpStatus, ['accepted', 'mediation_scheduled', 'mediation_ongoing'], true)
+                                ? [8 => 'After you schedule the hearing below', 9 => 'After you schedule the hearing below', 91 => 'After you schedule the hearing below']
+                                : []); ?>
+                        <?php $medPending = $kpPendingHearing('mediation'); ?>
+                        <?php if (in_array($kpStatus, ['accepted', 'mediation_scheduled', 'mediation_ongoing']) && $medPending): ?>
+                        <div class="kp-info-box">
+                            <i class="uil uil-calendar-alt"></i>
+                            <div><strong>Hearing scheduled for <?= date('M d, Y', strtotime($medPending['hearing_date'])) ?><?= $medPending['hearing_time'] ? ' at ' . date('h:i A', strtotime($medPending['hearing_time'])) : '' ?></strong><p>Record what happened at the hearing below. If it is adjourned, you can schedule the next one here.</p></div>
+                        </div>
+                        <?php elseif (in_array($kpStatus, ['accepted', 'mediation_scheduled', 'mediation_ongoing'])): ?>
+                        <p class="kp-section-desc"><?= kp_filter_hearings($hearings, 'mediation') ? 'The last hearing was adjourned. Schedule the next mediation hearing before the Punong Barangay.' : 'Schedule the mediation hearing before the Punong Barangay. The summons (KP Form #9) and the notice to the complainant (KP Form #8) are issued on the next working day after the complaint is received.' ?> Pick a hearing date usually 3 to 5 days after the summons, so it can be served and both parties have time to prepare.</p>
                         <form method="POST" action="kp_hearing.php" class="kp-hearing-form">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                             <input type="hidden" name="stage" value="mediation">
@@ -877,6 +1212,7 @@ $actionError = [
                             <i class="uil uil-exclamation-triangle" style="color:#b45309"></i>
                             <div><strong>Complainant failed to appear</strong><p>Schedule a hearing for the complainant to explain the absence (KP Form #18).</p></div>
                         </div>
+                        <p class="kp-section-desc">There is no waiting period for this hearing. Pick a date that gives the complainant time to receive the notice (KP Form #18), usually 2 to 3 days from today, then generate the notice under "Forms for this step".</p>
                         <?php if (!kp_filter_hearings($hearings, 'mediation', 'explanation_complainant') || !array_filter(kp_filter_hearings($hearings, 'mediation', 'explanation_complainant'), fn($h) => empty($h['outcome']))): ?>
                         <form method="POST" action="kp_hearing.php" class="kp-hearing-form" style="margin-top:12px;">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
@@ -896,21 +1232,23 @@ $actionError = [
                             <i class="uil uil-info-circle"></i>
                             <div><strong>Mediation not available</strong><p>The case must be accepted before scheduling mediation.</p></div>
                         </div>
+                        <?php elseif (kp_filter_hearings($hearings, 'mediation')): ?>
+                        <?php kp_render_moved_on('mediation', $kpNextStep, kp_status_label($kpStatus)); ?>
                         <?php endif; ?>
 
-                        <?php $medHearings = kp_filter_hearings($hearings, 'mediation'); ?>
-                        <?php if ($medHearings): ?>
-                        <h4 class="kp-sub-title">Mediation Hearings</h4>
-                        <?php kp_render_hearings($medHearings, (int)$case['id'], 'mediation', [
-                            'adjourned'          => 'Adjourned',
-                            'settled'            => 'Settled',
-                            'failed'             => 'Failed — proceed to Pangkat',
-                            'complainant_absent' => 'Complainant absent',
-                            'respondent_absent'  => 'Respondent absent — proceed to Pangkat',
-                        ], in_array($kpStatus, ['mediation_scheduled', 'mediation_ongoing'], true)); ?>
-
-                        <?php if (!in_array($kpStatus, kp_terminal_statuses(), true)): ?>
-                        <h4 class="kp-sub-title">Service of Summons (Officer's Return)</h4>
+                        <?php
+                            $medHearings = kp_filter_hearings($hearings, 'mediation');
+                            // Service of summons is recorded once for each hearing still waiting for its outcome.
+                            $servedHearingIds = array_map('intval', array_column($serviceAttempts, 'hearing_id'));
+                            $unservedHearings = array_values(array_filter($medHearings, fn($mh) => empty($mh['outcome']) && !in_array((int)$mh['id'], $servedHearingIds, true)));
+                        ?>
+                        <?php $canRecordService = $unservedHearings && !in_array($kpStatus, kp_terminal_statuses(), true); ?>
+                        <?php if ($serviceAttempts || $canRecordService): ?>
+                        <details class="kp-fold">
+                        <summary><i class="uil uil-envelope-check"></i> Service of Summons (Officer's Return)<span><?= $serviceAttempts ? count($serviceAttempts) . ' recorded' : 'Optional: show' ?></span></summary>
+                        <div class="kp-fold-body">
+                        <p class="kp-section-desc">Optional. The serving officer can fill in KP Form #9-A by hand. Recording the service here prints it filled in and keeps proof that the respondent was notified, which helps if the respondent later does not appear.</p>
+                        <?php if ($canRecordService): ?>
                         <form method="POST" action="kp_hearing.php">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                             <input type="hidden" name="action" value="record_service">
@@ -918,7 +1256,7 @@ $actionError = [
                                 <div class="kp-field">
                                     <label>Hearing <span>*</span></label>
                                     <select name="hearing_id" required>
-                                        <?php foreach (array_reverse($medHearings) as $mh): ?>
+                                        <?php foreach ($unservedHearings as $mh): ?>
                                         <option value="<?= (int)$mh['id'] ?>"><?= date('M d, Y', strtotime($mh['hearing_date'])) ?></option>
                                         <?php endforeach; ?>
                                     </select>
@@ -948,16 +1286,30 @@ $actionError = [
                             </div>
                         </form>
                         <?php endif; ?>
+                        <?php if ($serviceAttempts): ?>
+                        <div class="kp-service-list" style="margin-top:12px;">
+                            <?php foreach (array_reverse($serviceAttempts) as $sa): ?>
+                            <div class="kp-service-row"><i class="uil uil-check-circle"></i> Served <?= date('M d, Y', strtotime($sa['served_date'])) ?> &middot; <?= htmlspecialchars($serviceMethodLabels[$sa['service_method']] ?? $sa['service_method']) ?><?= $sa['received_by'] !== '' && $sa['received_by'] !== null ? ' (received by ' . htmlspecialchars($sa['received_by']) . ')' : '' ?></div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
+                        </div>
+                        </details>
                         <?php endif; ?>
 
-                        <?php $medExplain = kp_filter_hearings($hearings, 'mediation', 'explanation_complainant'); ?>
-                        <?php if ($medExplain): ?>
-                        <h4 class="kp-sub-title">Failure-to-Appear Hearings</h4>
-                        <?php kp_render_hearings($medExplain, (int)$case['id'], 'mediation', [
-                            'justified'   => 'Absence justified — resume mediation',
-                            'unjustified' => 'Absence unjustified — dismiss and bar action',
-                        ], $kpStatus === 'mediation_noshow_complainant'); ?>
-                        <?php endif; ?>
+                        <?php kp_render_hearing_groups([
+                            [$medHearings, [
+                                'adjourned'          => ['Adjourned', 'The hearing is postponed. You can then schedule the next mediation hearing.'],
+                                'settled'            => ['Settled', 'The parties agreed. Record the terms in the Settlement tab, then generate KP Form #16.'],
+                                'failed'             => ['Failed', 'No agreement. The case moves to the Pangkat (KP Form #10).'],
+                                'complainant_absent' => ['Complainant absent', 'A hearing is set for the complainant to explain the absence (KP Form #18).'],
+                                'respondent_absent'  => ['Respondent absent', 'Mediation fails and the case moves to the Pangkat (KP Form #10).'],
+                            ], in_array($kpStatus, ['mediation_scheduled', 'mediation_ongoing'], true)],
+                            [kp_filter_hearings($hearings, 'mediation', 'explanation_complainant'), [
+                                'justified'   => ['Absence justified', 'Mediation resumes. Schedule the next mediation hearing.'],
+                                'unjustified' => ['Absence unjustified', 'The complaint is dismissed and the action is barred (KP Form #' . kp_form_label(23) . ').'],
+                            ], $kpStatus === 'mediation_noshow_complainant'],
+                        ], (int)$case['id'], 'mediation'); ?>
                     </div>
                 </div>
 
@@ -966,10 +1318,46 @@ $actionError = [
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Pangkat ng Tagapagkasundo</h3>
 
+                        <?php
+                            $constitutionMeetings = kp_filter_hearings($hearings, 'conciliation', 'pangkat_constitution');
+                            $pendingMeeting = null;
+                            foreach ($constitutionMeetings as $cm) {
+                                if (empty($cm['outcome'])) { $pendingMeeting = $cm; }
+                            }
+                        ?>
+                        <?php if ($kpStatus === 'pangkat_constitution' || $hasPangkat): ?>
+                        <?php kp_render_step_forms([10, 11], $stepFormsAvailable, $documents, (int)$case['id'], 'pangkat', $pangkat,
+                            $kpStatus === 'pangkat_constitution' && !$hasPangkat
+                                ? [10 => 'After you schedule the constitution meeting below', 11 => 'After you record the chosen members below']
+                                : []); ?>
+                        <?php endif; ?>
+
                         <?php if ($kpStatus === 'pangkat_constitution' && !$hasPangkat): ?>
-                        <p class="kp-section-desc">Within 15 days from the last mediation hearing, the Punong Barangay calls the parties to choose the three Pangkat members from the Lupon (KP Form #10). If they fail to agree or to appear, the Punong Barangay determines the members by drawing of lots. Once constituted, the Pangkat meets within 3 days.</p>
+                        <p class="kp-section-desc">Within 15 days from the last mediation hearing, the Punong Barangay calls the parties to a meeting to choose the three Pangkat members from the Lupon (KP Form #10). If they fail to agree or to appear, the Punong Barangay chooses the members by drawing of lots. Once constituted, the Pangkat meets within 3 days.</p>
 
                         <h4 class="kp-sub-title">1. Constitution Meeting</h4>
+                        <?php if ($pendingMeeting): ?>
+                        <div class="kp-info-box">
+                            <i class="uil uil-calendar-alt"></i>
+                            <div>
+                                <strong>Meeting scheduled for <?= date('M d, Y', strtotime($pendingMeeting['hearing_date'])) ?><?= $pendingMeeting['hearing_time'] ? ' at ' . date('h:i A', strtotime($pendingMeeting['hearing_time'])) : '' ?></strong>
+                                <p>What happened at the meeting? If it took place, the parties chose the three members: record them in step 2. If it did not take place, mark it as not held and schedule it again.</p>
+                                <div class="kp-meeting-choices">
+                                    <button type="button" class="kp-btn kp-btn-primary kp-btn-sm" onclick="kpGoToPangkatForm()"><i class="uil uil-check-circle"></i> Meeting held: record the members</button>
+                                    <form method="POST" action="kp_hearing.php">
+                                        <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                        <input type="hidden" name="stage" value="conciliation">
+                                        <input type="hidden" name="hearing_id" value="<?= (int)$pendingMeeting['id'] ?>">
+                                        <input type="hidden" name="outcome" value="not_held">
+                                        <button type="submit" name="action" value="meeting_not_held" class="kp-btn kp-btn-outline kp-btn-sm"><i class="uil uil-times-circle"></i> Meeting not held: schedule again</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        <?php else: ?>
+                        <?php if ($constitutionMeetings): ?>
+                        <p class="kp-section-desc">The last meeting was not held. Schedule the constitution meeting again.</p>
+                        <?php endif; ?>
                         <form method="POST" action="kp_hearing.php" class="kp-hearing-form">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                             <input type="hidden" name="stage" value="conciliation">
@@ -979,10 +1367,17 @@ $actionError = [
                                 <button type="submit" name="action" value="schedule" class="kp-btn kp-btn-primary"><i class="uil uil-calendar-alt"></i> Schedule Constitution Meeting</button>
                             </div>
                         </form>
-                        <?php kp_render_hearings(kp_filter_hearings($hearings, 'conciliation', 'pangkat_constitution'), (int)$case['id'], 'conciliation', ['held' => 'Meeting held'], true); ?>
+                        <?php endif; ?>
 
                         <h4 class="kp-sub-title">2. Chosen Members and Officers</h4>
-                        <form method="POST" action="kp_pangkat.php" class="kp-pangkat-form">
+                        <?php if (!$pendingMeeting): ?>
+                        <div class="kp-info-box">
+                            <i class="uil uil-info-circle"></i>
+                            <div><strong>Schedule the constitution meeting first</strong><p>The members are chosen at that meeting.</p></div>
+                        </div>
+                        <?php else: ?>
+                        <p class="kp-section-desc">Record the three members chosen at the meeting and the officers they elected. Saving this also records the meeting as held.</p>
+                        <form method="POST" action="kp_pangkat.php" class="kp-pangkat-form" id="kpPangkatForm">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                             <?php for ($i = 1; $i <= 3; $i++): ?>
                             <div class="kp-field-row">
@@ -1021,11 +1416,15 @@ $actionError = [
                                 <button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-users-alt"></i> Record Pangkat</button>
                             </div>
                         </form>
+                        <?php endif; ?>
 
                         <?php elseif ($hasPangkat): ?>
                         <div class="kp-info-box kp-info-success">
                             <i class="uil uil-check-circle"></i>
-                            <div><strong>Pangkat Constituted</strong><p>Generate KP Form #11 for each chosen member from the Documents tab.</p></div>
+                            <div><strong>Pangkat Constituted</strong><p>Generate KP Form #11 for each chosen member under "Forms for this step" above. Next, schedule the first conciliation hearing; the Pangkat meets within 3 days of its constitution.</p>
+                            <?php if ($kpStatus !== 'pangkat_constitution'): ?>
+                            <p style="margin-top:8px;">The case is now: <strong><?= htmlspecialchars(kp_status_label($kpStatus)) ?></strong>.</p>
+                            <?php endif; ?></div>
                         </div>
                         <div class="kp-pangkat-list">
                             <?php foreach ($pangkat as $pm): ?>
@@ -1039,7 +1438,7 @@ $actionError = [
                             </div>
                             <?php endforeach; ?>
                         </div>
-                        <?php kp_render_hearings(kp_filter_hearings($hearings, 'conciliation', 'pangkat_constitution'), (int)$case['id'], 'conciliation', ['held' => 'Meeting held'], $kpStatus === 'pangkat_constitution'); ?>
+                        <?php kp_render_hearing_groups([[$constitutionMeetings, [], false]], (int)$case['id'], 'conciliation'); ?>
                         <?php else: ?>
                         <div class="kp-info-box">
                             <i class="uil uil-info-circle"></i>
@@ -1053,7 +1452,17 @@ $actionError = [
                 <div class="kp-tab-content" id="tab-conciliation">
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Conciliation</h3>
-                        <?php if ($hasPangkat && in_array($kpStatus, ['pangkat_constitution', 'conciliation_scheduled', 'conciliation_ongoing'], true)): ?>
+                        <?php kp_render_step_forms([12, 9, 13, 18, 19], $stepFormsAvailable, $documents, (int)$case['id'], 'conciliation', [],
+                            $hasPangkat && in_array($kpStatus, ['pangkat_constitution', 'conciliation_scheduled', 'conciliation_ongoing'], true)
+                                ? [12 => 'After you schedule the first conciliation hearing below']
+                                : []); ?>
+                        <?php $conPending = $kpPendingHearing('conciliation'); ?>
+                        <?php if ($hasPangkat && in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing'], true) && $conPending): ?>
+                        <div class="kp-info-box">
+                            <i class="uil uil-calendar-alt"></i>
+                            <div><strong>Hearing scheduled for <?= date('M d, Y', strtotime($conPending['hearing_date'])) ?><?= $conPending['hearing_time'] ? ' at ' . date('h:i A', strtotime($conPending['hearing_time'])) : '' ?></strong><p>Record what happened at the hearing below. If it is adjourned, you can schedule the next one here.</p></div>
+                        </div>
+                        <?php elseif ($hasPangkat && in_array($kpStatus, ['pangkat_constitution', 'conciliation_scheduled', 'conciliation_ongoing'], true)): ?>
                         <p class="kp-section-desc">Schedule conciliation hearings before the Pangkat ng Tagapagkasundo (KP Form #12). The Pangkat meets within 3 days of its constitution and has 15 days to settle the dispute<?= $case['conciliation_deadline'] ? ' — until <strong>' . date('M d, Y', strtotime($case['conciliation_deadline'])) . '</strong>' : '' ?>.</p>
                         <form method="POST" action="kp_hearing.php" class="kp-hearing-form">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
@@ -1064,19 +1473,6 @@ $actionError = [
                             </div>
                         </form>
 
-                        <?php if (in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing'], true) && (int)($case['conciliation_extended'] ?? 0) === 0 && !empty($case['conciliation_deadline'])): ?>
-                        <h4 class="kp-sub-title">Extend Conciliation Period</h4>
-                        <form method="POST" action="kp_hearing.php">
-                            <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
-                            <div class="kp-field">
-                                <label>Reason (meritorious case) <span>*</span></label>
-                                <textarea name="reason" rows="2" required placeholder="Why the Pangkat needs 15 more days..."></textarea>
-                            </div>
-                            <div class="kp-form-actions">
-                                <button type="submit" name="action" value="extend_conciliation" class="kp-btn kp-btn-primary"><i class="uil uil-calendar-alt"></i> Extend by 15 Days</button>
-                            </div>
-                        </form>
-                        <?php endif; ?>
 
                         <?php elseif (in_array($kpStatus, ['conciliation_noshow_complainant', 'conciliation_noshow_respondent'], true)): ?>
                         <?php
@@ -1088,6 +1484,7 @@ $actionError = [
                             <i class="uil uil-exclamation-triangle" style="color:#b45309"></i>
                             <div><strong><?= ucfirst($absentParty) ?> failed to appear before the Pangkat</strong><p>Schedule a hearing for the <?= $absentParty ?> to explain the absence (KP Form #<?= $absentParty === 'complainant' ? '18' : '19' ?>).</p></div>
                         </div>
+                        <p class="kp-section-desc">There is no waiting period for this hearing. Pick a date that gives the <?= $absentParty ?> time to receive the notice (KP Form #<?= $absentParty === 'complainant' ? '18' : '19' ?>), usually 2 to 3 days from today, then generate the notice under "Forms for this step".</p>
                         <?php if (!$pendingExplain): ?>
                         <form method="POST" action="kp_hearing.php" class="kp-hearing-form" style="margin-top:12px;">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
@@ -1098,38 +1495,59 @@ $actionError = [
                         </form>
                         <?php endif; ?>
 
-                        <?php elseif (!$hasPangkat): ?>
+                        <?php elseif (!$hasPangkat && $kpStatus !== 'pangkat_constitution'): ?>
                         <div class="kp-info-box">
                             <i class="uil uil-info-circle"></i>
                             <div><strong>Conciliation not yet available</strong><p>Conciliation begins after a Pangkat is constituted following failed mediation.</p></div>
                         </div>
                         <?php endif; ?>
 
-                        <?php $conHearings = kp_filter_hearings($hearings, 'conciliation'); ?>
-                        <?php if ($conHearings): ?>
-                        <h4 class="kp-sub-title">Conciliation Hearings</h4>
-                        <?php kp_render_hearings($conHearings, (int)$case['id'], 'conciliation', [
-                            'adjourned'          => 'Adjourned',
-                            'settled'            => 'Settled',
-                            'failed'             => 'Failed — issue Certification to File Action',
-                            'complainant_absent' => 'Complainant absent',
-                            'respondent_absent'  => 'Respondent absent',
-                        ], in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing'], true)); ?>
+                        <?php if (in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing'], true) && (int)($case['conciliation_extended'] ?? 0) === 0 && !empty($case['conciliation_deadline'])): ?>
+                        <details class="kp-fold">
+                        <summary><i class="uil uil-calendar-alt"></i> Extend Conciliation Period<span>Only if needed: show</span></summary>
+                        <div class="kp-fold-body">
+                        <p class="kp-section-desc">The Pangkat has 15 days to settle<?= !empty($case['conciliation_deadline']) ? ' (until <strong>' . date('M d, Y', strtotime($case['conciliation_deadline'])) . '</strong>)' : '' ?>. In a meritorious case it may be extended once by 15 more days.</p>
+                        <form method="POST" action="kp_hearing.php">
+                            <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                            <div class="kp-field">
+                                <label>Reason (meritorious case) <span>*</span></label>
+                                <textarea name="reason" rows="2" required placeholder="Why the Pangkat needs 15 more days..."></textarea>
+                            </div>
+                            <div class="kp-form-actions">
+                                <button type="submit" name="action" value="extend_conciliation" class="kp-btn kp-btn-primary"><i class="uil uil-calendar-alt"></i> Extend by 15 Days</button>
+                            </div>
+                        </form>
+                        </div>
+                        </details>
                         <?php endif; ?>
 
-                        <?php $conExplainC = kp_filter_hearings($hearings, 'conciliation', 'explanation_complainant'); ?>
-                        <?php $conExplainR = kp_filter_hearings($hearings, 'conciliation', 'explanation_respondent'); ?>
-                        <?php if ($conExplainC || $conExplainR): ?>
-                        <h4 class="kp-sub-title">Failure-to-Appear Hearings</h4>
-                        <?php kp_render_hearings($conExplainC, (int)$case['id'], 'conciliation', [
-                            'justified'   => 'Absence justified — resume conciliation',
-                            'unjustified' => 'Absence unjustified — dismiss and bar action',
-                        ], $kpStatus === 'conciliation_noshow_complainant'); ?>
-                        <?php kp_render_hearings($conExplainR, (int)$case['id'], 'conciliation', [
-                            'justified'   => 'Absence justified — resume conciliation',
-                            'unjustified' => 'Absence unjustified — certify to file action, bar counterclaim',
-                        ], $kpStatus === 'conciliation_noshow_respondent'); ?>
+                        <?php if ($kpStatus === 'pangkat_constitution' && !$hasPangkat): ?>
+                        <div class="kp-info-box">
+                            <i class="uil uil-info-circle"></i>
+                            <div><strong>Constitute the Pangkat first</strong><p>Conciliation hearings are held before the Pangkat. Schedule the constitution meeting and record the chosen members in the Pangkat tab.</p></div>
+                        </div>
                         <?php endif; ?>
+
+                        <?php if (kp_filter_hearings($hearings, 'conciliation') && !in_array($kpStatus, ['pangkat_constitution', 'conciliation_scheduled', 'conciliation_ongoing', 'conciliation_noshow_complainant', 'conciliation_noshow_respondent'], true)) {
+                            kp_render_moved_on('conciliation', $kpNextStep, kp_status_label($kpStatus));
+                        } ?>
+                        <?php kp_render_hearing_groups([
+                            [kp_filter_hearings($hearings, 'conciliation'), [
+                                'adjourned'          => ['Adjourned', 'The hearing is postponed. You can then schedule the next conciliation hearing.'],
+                                'settled'            => ['Settled', 'The parties agreed. Record the terms in the Settlement tab, then generate KP Form #16.'],
+                                'failed'             => ['Failed', 'No agreement. A Certification to File Action is issued (KP Form #' . kp_form_label(21) . ').'],
+                                'complainant_absent' => ['Complainant absent', 'A hearing is set for the complainant to explain the absence (KP Form #18).'],
+                                'respondent_absent'  => ['Respondent absent', 'A hearing is set for the respondent to explain the absence (KP Form #19).'],
+                            ], in_array($kpStatus, ['conciliation_scheduled', 'conciliation_ongoing'], true)],
+                            [kp_filter_hearings($hearings, 'conciliation', 'explanation_complainant'), [
+                                'justified'   => ['Absence justified', 'Conciliation resumes. Schedule the next conciliation hearing.'],
+                                'unjustified' => ['Absence unjustified', 'The complaint is dismissed and the action is barred (KP Form #' . kp_form_label(23) . ').'],
+                            ], $kpStatus === 'conciliation_noshow_complainant'],
+                            [kp_filter_hearings($hearings, 'conciliation', 'explanation_respondent'), [
+                                'justified'   => ['Absence justified', 'Conciliation resumes. Schedule the next conciliation hearing.'],
+                                'unjustified' => ['Absence unjustified', 'Certification to File Action (KP Form #' . kp_form_label(22) . ') and to Bar Counterclaim (KP Form #' . kp_form_label(24) . ').'],
+                            ], $kpStatus === 'conciliation_noshow_respondent'],
+                        ], (int)$case['id'], 'conciliation'); ?>
                     </div>
                 </div>
 
@@ -1137,6 +1555,7 @@ $actionError = [
                 <div class="kp-tab-content" id="tab-settlement">
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Settlement &amp; Finality</h3>
+                        <?php kp_render_step_forms([16, 15, 17, 20], $stepFormsAvailable, $documents, (int)$case['id'], 'settlement'); ?>
 
                         <?php if (in_array($kpStatus, ['mediation_settled', 'conciliation_settled'], true)): ?>
                         <p class="kp-section-desc">Record the terms of the amicable settlement (KP Form #16), written in a language or dialect known to the parties. The 10-day repudiation period starts on the settlement date.</p>
@@ -1158,7 +1577,9 @@ $actionError = [
                         <?php endif; ?>
 
                         <?php if ($kpStatus === 'settlement_repudiation' && $activeSettlement && $today <= $activeSettlement['repudiation_deadline']): ?>
-                        <h4 class="kp-sub-title">Record Repudiation (KP Form #17)</h4>
+                        <details class="kp-fold">
+                        <summary><i class="uil uil-file-block-alt"></i> Record Repudiation (KP Form #17)<span>Only if a party repudiates: show</span></summary>
+                        <div class="kp-fold-body">
                         <p class="kp-section-desc">A party may repudiate the settlement until <strong><?= date('M d, Y', strtotime($activeSettlement['repudiation_deadline'])) ?></strong> by a statement sworn before the Punong Barangay / Pangkat Chairman, only on the ground that consent was obtained by fraud, violence or intimidation.</p>
                         <form method="POST" action="kp_settlement.php">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
@@ -1175,11 +1596,13 @@ $actionError = [
                                 <button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-save"></i> Record Repudiation</button>
                             </div>
                         </form>
+                        </div>
+                        </details>
                         <?php endif; ?>
 
                         <?php if (in_array($kpStatus, ['settlement_repudiation', 'arbitration_awarded'], true) && $activeSettlement): ?>
                         <h4 class="kp-sub-title">Finality</h4>
-                        <?php if ($today > $activeSettlement['repudiation_deadline']): ?>
+                        <?php if (kp_period_over($activeSettlement['repudiation_deadline'])): ?>
                         <form method="POST" action="kp_settlement.php">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                             <input type="hidden" name="action" value="confirm_final">
@@ -1191,6 +1614,10 @@ $actionError = [
                         <?php else: ?>
                         <div class="kp-info-box"><i class="uil uil-clock"></i><div><strong>Finality on <?= date('M d, Y', strtotime($activeSettlement['repudiation_deadline'] . ' +1 day')) ?></strong><p>The settlement/award becomes final and executory once the 10-day period ends.</p></div></div>
                         <?php endif; ?>
+                        <?php endif; ?>
+
+                        <?php if ($settlements && !in_array($kpStatus, ['mediation_settled', 'conciliation_settled', 'settlement_repudiation', 'arbitration_awarded'], true)): ?>
+                        <?php kp_render_moved_on('settlement', $kpNextStep, kp_status_label($kpStatus)); ?>
                         <?php endif; ?>
 
                         <?php if (!empty($settlements)): ?>
@@ -1213,27 +1640,8 @@ $actionError = [
                                 <?php endif; ?>
                             </div>
                             <?php if (!$stl['repudiated']): ?>
-                            <?php
-                                // LGC Sec. 419: transmit within 5 days of the award, or of the end of the settlement's repudiation period.
-                                $isAwardRow   = $stl['settlement_type'] === 'arbitration_award';
-                                $transmitFrom = $isAwardRow ? $stl['settlement_date'] : date('Y-m-d', strtotime($stl['repudiation_deadline'] . ' +1 day'));
-                                $transmitDue  = date('Y-m-d', strtotime(($isAwardRow ? $stl['settlement_date'] : $stl['repudiation_deadline']) . ' +5 days'));
-                            ?>
                             <div class="kp-stl-footer" style="border-top:1px dashed #e2e8f0;margin-top:8px;padding-top:8px;">
-                                <?php if (!empty($stl['transmitted_at'])): ?>
-                                <span>Transmitted to the city court on <strong><?= date('M d, Y', strtotime($stl['transmitted_at'])) ?></strong></span>
-                                <?php elseif ($today >= $transmitFrom): ?>
-                                <form method="POST" action="kp_settlement.php" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-                                    <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
-                                    <input type="hidden" name="action" value="record_transmittal">
-                                    <input type="hidden" name="settlement_id" value="<?= (int)$stl['id'] ?>">
-                                    <span>Send a copy to the city court by <strong><?= date('M d, Y', strtotime($transmitDue)) ?></strong>. Sent on:</span>
-                                    <input type="date" name="transmitted_on" required value="<?= $today ?>" min="<?= $transmitFrom ?>" max="<?= $today ?>">
-                                    <button type="submit" class="kp-btn kp-btn-sm"><i class="uil uil-save"></i> Record Transmittal</button>
-                                </form>
-                                <?php else: ?>
-                                <span>Send a copy to the city court between <strong><?= date('M d, Y', strtotime($transmitFrom)) ?></strong> and <strong><?= date('M d, Y', strtotime($transmitDue)) ?></strong>.</span>
-                                <?php endif; ?>
+                                <span><i class="uil uil-info-circle"></i> Reminder: the Lupon Secretary sends a copy of the <?= $stl['settlement_type'] === 'arbitration_award' ? 'award (KP Form #15)' : 'settlement (KP Form #16)' ?> to the city court within 5 days<?= $stl['settlement_type'] === 'arbitration_award' ? ' of the award' : ' after the repudiation period ends' ?> (LGC Sec. 419).</span>
                             </div>
                             <?php endif; ?>
                         </div>
@@ -1251,6 +1659,7 @@ $actionError = [
                 <div class="kp-tab-content" id="tab-arbitration">
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Arbitration</h3>
+                        <?php kp_render_step_forms([14, 15, 17, 20, 13], $stepFormsAvailable, $documents, (int)$case['id'], 'arbitration'); ?>
 
                         <?php if (in_array($kpStatus, ['mediation_scheduled', 'mediation_ongoing', 'pangkat_constitution', 'conciliation_scheduled', 'conciliation_ongoing'], true)): ?>
                         <?php $arbitrationDuringMediation = in_array($kpStatus, ['mediation_scheduled', 'mediation_ongoing'], true); ?>
@@ -1287,14 +1696,17 @@ $actionError = [
                             <div class="kp-stl-footer">
                                 <span>Repudiation period ends: <strong><?= date('M d, Y', strtotime($latestAgreement['repudiation_deadline'])) ?></strong></span>
                                 <?php if ((int)$latestAgreement['repudiated'] === 1): ?><span class="kp-badge-red">REPUDIATED</span>
-                                <?php elseif ($agreementWindowOpen): ?><span class="kp-badge-yellow">REPUDIATION PERIOD</span>
+                                <?php elseif ($agreementWindowOpen && $kpStatus === 'arbitration_agreed'): ?><span class="kp-badge-yellow">REPUDIATION PERIOD</span>
                                 <?php else: ?><span class="kp-badge-green">BINDING</span><?php endif; ?>
                             </div>
                         </div>
                         <?php endif; ?>
 
                         <?php if ($kpStatus === 'arbitration_agreed' && $agreementWindowOpen): ?>
-                        <h4 class="kp-sub-title">Record Repudiation of the Agreement (KP Form #17)</h4>
+                        <details class="kp-fold">
+                        <summary><i class="uil uil-file-block-alt"></i> Record Repudiation of the Agreement (KP Form #17)<span>Only if a party repudiates: show</span></summary>
+                        <div class="kp-fold-body">
+                        <p class="kp-section-desc">A party may repudiate the agreement for arbitration within 5 days<?= !empty($latestAgreement['repudiation_deadline']) ? ' (until <strong>' . date('M d, Y', strtotime($latestAgreement['repudiation_deadline'])) . '</strong>)' : '' ?> by a sworn statement, only on the ground that consent was obtained by fraud, violence or intimidation.</p>
                         <form method="POST" action="kp_arbitration.php">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                             <input type="hidden" name="action" value="repudiate_agreement">
@@ -1310,32 +1722,61 @@ $actionError = [
                                 <button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-save"></i> Record Repudiation</button>
                             </div>
                         </form>
+                        </div>
+                        </details>
                         <?php endif; ?>
 
-                        <?php if (in_array($kpStatus, ['arbitration_agreed', 'arbitration_hearing'], true) && $latestAgreement && !$agreementWindowOpen): ?>
+                        <?php $arbPending = $kpPendingHearing('arbitration'); ?>
+                        <?php if (in_array($kpStatus, ['arbitration_agreed', 'arbitration_hearing'], true) && $latestAgreement && (!$agreementWindowOpen || KP_SKIP_WAITING_PERIODS) && !$arbPending && !$lastAwardHearing): ?>
                         <h4 class="kp-sub-title">Schedule Arbitration Hearing</h4>
                         <form method="POST" action="kp_hearing.php" class="kp-hearing-form">
                             <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                             <input type="hidden" name="stage" value="arbitration">
-                            <?php kp_render_schedule_fields($defaultLocation, max($today, date('Y-m-d', strtotime($latestAgreement['repudiation_deadline'] . ' +1 day')))); ?>
+                            <?php kp_render_schedule_fields($defaultLocation, KP_SKIP_WAITING_PERIODS ? $today : max($today, date('Y-m-d', strtotime($latestAgreement['repudiation_deadline'] . ' +1 day')))); ?>
                             <div class="kp-form-actions">
                                 <button type="submit" name="action" value="schedule" class="kp-btn kp-btn-primary"><i class="uil uil-calendar-alt"></i> Schedule Arbitration Hearing</button>
                             </div>
                         </form>
                         <?php endif; ?>
 
-                        <?php $arbHearings = kp_filter_hearings($hearings, 'arbitration'); ?>
-                        <?php if ($arbHearings): ?>
-                        <h4 class="kp-sub-title">Arbitration Hearings</h4>
-                        <?php kp_render_hearings($arbHearings, (int)$case['id'], 'arbitration', [
-                            'adjourned' => 'Adjourned',
-                            'concluded' => 'Submitted for award',
-                        ], $kpStatus === 'arbitration_hearing'); ?>
+                        <?php
+                            $arbitrationAward = null;
+                            foreach ($settlements as $stl) {
+                                if ($stl['settlement_type'] === 'arbitration_award' && (int)$stl['repudiated'] === 0) { $arbitrationAward = $stl; break; }
+                            }
+                        ?>
+                        <?php if ($arbitrationAward): ?>
+                        <h4 class="kp-sub-title">Arbitration Award (KP Form #15)</h4>
+                        <div class="kp-settlement-card">
+                            <div class="kp-stl-header">
+                                <strong>Award by the <?= ($latestAgreement['arbitrator'] ?? '') === 'pangkat' ? 'Pangkat ng Tagapagkasundo' : 'Punong Barangay' ?></strong>
+                                <span class="kp-stl-date"><?= date('M d, Y', strtotime($arbitrationAward['settlement_date'])) ?></span>
+                            </div>
+                            <div class="kp-stl-terms"><?= nl2br(htmlspecialchars((string)$arbitrationAward['terms'])) ?></div>
+                            <div class="kp-stl-footer">
+                                <span>Final after 10 days, unless a petition to nullify it is filed in court: <strong><?= date('M d, Y', strtotime($arbitrationAward['repudiation_deadline'])) ?></strong></span>
+                                <?php if (!empty($arbitrationAward['final_at'])): ?><span class="kp-badge-green">FINAL &amp; EXECUTORY</span>
+                                <?php else: ?><span class="kp-badge-yellow">NULLIFICATION PERIOD</span><?php endif; ?>
+                            </div>
+                        </div>
+                        <?php if ($kpStatus === 'arbitration_awarded'): ?>
+                        <div class="kp-info-box kp-moved-on" style="margin-top:12px;">
+                            <i class="uil uil-arrow-circle-right"></i>
+                            <div><strong>Next: confirm finality</strong><p>After the 10-day period, confirm the award as final and executory in the Settlement tab. Then follow its compliance.</p></div>
+                        </div>
                         <?php endif; ?>
+                        <?php endif; ?>
+
+                        <?php kp_render_hearing_groups([
+                            [kp_filter_hearings($hearings, 'arbitration'), [
+                                'adjourned' => ['Adjourned', 'The hearing is postponed. You can then schedule the next arbitration hearing.'],
+                                'concluded' => ['Submitted for award', 'Both sides have been heard. Record the Arbitration Award (KP Form #15) below.'],
+                            ], $kpStatus === 'arbitration_hearing'],
+                        ], (int)$case['id'], 'arbitration'); ?>
 
                         <?php if ($kpStatus === 'arbitration_hearing' && $lastAwardHearing): ?>
                         <?php
-                            $awardEarliest = max($lastAwardHearing, date('Y-m-d', strtotime($latestAgreement['repudiation_deadline'] . ' +1 day')));
+                            $awardEarliest = KP_SKIP_WAITING_PERIODS ? $lastAwardHearing : max($lastAwardHearing, date('Y-m-d', strtotime($latestAgreement['repudiation_deadline'] . ' +1 day')));
                             $awardDue = date('Y-m-d', strtotime($latestAgreement['repudiation_deadline'] . ' +10 days'));
                         ?>
                         <h4 class="kp-sub-title">Arbitration Award (KP Form #15)</h4>
@@ -1379,25 +1820,33 @@ $actionError = [
                             <i class="uil uil-eye"></i>
                             <div><strong>Compliance Monitoring Active</strong><p>The Lupon may execute the settlement/award until <?= $executionLimit ? date('M d, Y', strtotime($executionLimit)) : '—' ?> (6 months from the settlement date).</p></div>
                         </div>
-                        <form method="POST" action="kp_compliance.php" class="kp-compliance-form" style="margin-top:16px;">
-                            <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
-                            <div class="kp-field">
-                                <label>Compliance Status Update</label>
-                                <select name="action" required>
-                                    <option value="">— Select Action —</option>
-                                    <option value="mark_complied">Fully complied — close the case</option>
-                                    <option value="partial_compliance">Partial compliance — add note</option>
-                                    <option value="non_compliance">Non-compliance — note and go to Execution</option>
-                                </select>
-                            </div>
-                            <div class="kp-field">
-                                <label>Notes</label>
-                                <textarea name="notes" rows="3" placeholder="Describe the compliance status..."></textarea>
-                            </div>
-                            <div class="kp-form-actions">
-                                <button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-save"></i> Update Compliance</button>
-                            </div>
-                        </form>
+                        <h4 class="kp-sub-title">Did the parties comply?</h4>
+                        <div class="kp-ex-choices">
+                            <form method="POST" action="kp_compliance.php" class="kp-ex-choice">
+                                <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                <input type="hidden" name="action" value="mark_complied">
+                                <strong>Fully complied</strong>
+                                <small>All terms were carried out. The case is closed as settled and complied with.</small>
+                                <textarea name="notes" rows="2" placeholder="Optional note"></textarea>
+                                <button type="submit" class="kp-btn kp-btn-primary kp-btn-sm"><i class="uil uil-check-circle"></i> Close as Complied</button>
+                            </form>
+                            <form method="POST" action="kp_compliance.php" class="kp-ex-choice">
+                                <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                <input type="hidden" name="action" value="partial_compliance">
+                                <strong>Partly complied</strong>
+                                <small>Some terms were done. Note what was done; monitoring continues.</small>
+                                <textarea name="notes" rows="2" placeholder="e.g. paid 2,000 of 5,000"></textarea>
+                                <button type="submit" class="kp-btn kp-btn-outline kp-btn-sm"><i class="uil uil-save"></i> Save Note</button>
+                            </form>
+                            <form method="POST" action="kp_compliance.php" class="kp-ex-choice">
+                                <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                <input type="hidden" name="action" value="non_compliance">
+                                <strong>Not complied</strong>
+                                <small>The other party may ask the barangay to enforce it with a Motion for Execution (Execution tab).</small>
+                                <textarea name="notes" rows="2" placeholder="Optional note"></textarea>
+                                <button type="submit" class="kp-btn kp-btn-outline kp-btn-sm"><i class="uil uil-exclamation-circle"></i> Record Non-compliance</button>
+                            </form>
+                        </div>
                         <?php else: ?>
                         <div class="kp-info-box">
                             <i class="uil uil-info-circle"></i>
@@ -1411,10 +1860,12 @@ $actionError = [
                 <div class="kp-tab-content" id="tab-execution">
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Execution</h3>
+                        <?php kp_render_step_forms([25, 26, 27], $stepFormsAvailable, $documents, (int)$case['id'], 'execution'); ?>
 
                         <?php if ($kpStatus === 'compliance_monitoring' && $finalSettlement): ?>
                             <?php if ($today <= $executionLimit): ?>
-                            <p class="kp-section-desc">If the obliged party fails to comply, the other party may file a Motion for Execution (KP Form #23) with the Punong Barangay until <strong><?= date('M d, Y', strtotime($executionLimit)) ?></strong>.</p>
+                            <h4 class="kp-sub-title">1. Motion for Execution (KP Form #23)</h4>
+                            <p class="kp-section-desc">If the obliged party fails to comply, the other party may file a Motion for Execution (KP Form #23) with the Punong Barangay until <strong><?= date('M d, Y', strtotime($executionLimit)) ?></strong>. Then come the hearing on the motion (KP Form #24), 5 days for voluntary compliance, and if still not complied, the Notice of Execution (KP Form #25).</p>
                             <form method="POST" action="kp_execution.php">
                                 <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
                                 <input type="hidden" name="action" value="file_motion">
@@ -1427,7 +1878,8 @@ $actionError = [
                                     <button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-bolt"></i> File Motion for Execution</button>
                                 </div>
                             </form>
-                            <?php else: ?>
+                            <?php endif; ?>
+                            <?php if (kp_period_over($executionLimit)): ?>
                             <div class="kp-info-box" style="border-left: 3px solid #dc2626;">
                                 <i class="uil uil-exclamation-triangle" style="color:#dc2626"></i>
                                 <div><strong>6-month execution period has lapsed</strong><p>The settlement/award may now be enforced only by motion in the Municipal Trial Court.</p></div>
@@ -1440,53 +1892,106 @@ $actionError = [
                             </form>
                             <?php endif; ?>
 
-                        <?php elseif ($kpStatus === 'execution_pending' && $latestExecution): ?>
-                            <?php if (empty($latestExecution['hearing_date'])): ?>
-                            <h4 class="kp-sub-title">Hearing on the Motion (KP Form #24)</h4>
-                            <form method="POST" action="kp_execution.php" class="kp-hearing-form">
-                                <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
-                                <input type="hidden" name="action" value="schedule_hearing">
-                                <?php kp_render_schedule_fields($defaultLocation, $latestExecution['motion_date'], date('Y-m-d', strtotime($latestExecution['motion_date'] . ' +5 days'))); ?>
-                                <div class="kp-form-actions"><button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-calendar-alt"></i> Schedule Hearing</button></div>
-                            </form>
-                            <?php else: ?>
-                            <div class="kp-info-box">
-                                <i class="uil uil-clock"></i>
-                                <div><strong>Voluntary compliance period ends <?= date('M d, Y', strtotime($latestExecution['compliance_deadline'])) ?></strong><p>Hearing on the motion: <?= date('M d, Y', strtotime($latestExecution['hearing_date'])) ?>.</p></div>
-                            </div>
-                            <?php endif; ?>
+                        <?php elseif (in_array($kpStatus, ['execution_pending', 'execution_completed'], true) && $latestExecution): ?>
+                        <?php
+                            $ex = $latestExecution;
+                            $movingParty = preg_match('/Moving party:\s*(.+)/', (string)$ex['notes'], $mp) ? trim($mp[1]) : '';
+                            $exSettlement = $activeSettlement;
+                            foreach ($settlements as $stl) {
+                                if ((int)$stl['id'] === (int)($ex['settlement_id'] ?? 0)) { $exSettlement = $stl; }
+                            }
+                            $hasHearing = !empty($ex['hearing_date']);
+                            $noticeIssued = !empty($ex['execution_issued_at']);
+                            $completed = $kpStatus === 'execution_completed';
+                            $complied = (int)($ex['voluntary_compliance'] ?? 0) === 1;
+                            $compliancePassed = $hasHearing && kp_period_over($ex['compliance_deadline']);
+                            // Step states: done / current / todo / skipped
+                            $exSteps = [
+                                1 => 'done',
+                                2 => $hasHearing ? 'done' : 'current',
+                                3 => $complied || $noticeIssued ? 'done' : ($hasHearing ? 'current' : 'todo'),
+                                4 => $complied ? 'skipped' : ($completed ? 'done' : ($noticeIssued ? 'current' : 'todo')),
+                                5 => $completed ? 'current' : 'todo',
+                            ];
+                            $exStep = static function (int $n, string $title, string $state, string $meta = ''): void {
+                                $mark = $state === 'done' ? '<i class="uil uil-check"></i>' : ($state === 'skipped' ? '<i class="uil uil-minus"></i>' : $n);
+                                echo '<div class="kp-ex-step kp-ex-' . $state . '"><span class="kp-ex-num">' . $mark . '</span><div class="kp-ex-main"><div class="kp-ex-title">' . $title . '</div>'
+                                    . ($meta !== '' ? '<div class="kp-ex-meta">' . $meta . '</div>' : '');
+                            };
+                        ?>
+                        <p class="kp-section-desc">Follow the steps in order. Only the current step can be acted on.</p>
+                        <div class="kp-ex-steps">
+                            <?php $exStep(1, 'Motion for Execution (KP Form #23)', 'done',
+                                'Filed ' . date('M d, Y', strtotime($ex['motion_date'])) . ($movingParty !== '' ? ' by ' . htmlspecialchars($movingParty) : '')); ?>
+                            </div></div>
 
-                            <form method="POST" action="kp_execution.php" style="margin-top:16px;">
-                                <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
-                                <div class="kp-field">
-                                    <label>Execution Action</label>
-                                    <select name="action" required>
-                                        <option value="">— Select —</option>
-                                        <option value="complied">Obliged party complied voluntarily</option>
-                                        <?php if (!empty($latestExecution['compliance_deadline']) && empty($latestExecution['execution_issued_at']) && $today > $latestExecution['compliance_deadline']): ?>
-                                        <option value="issue_notice">Issue Notice of Execution (KP Form #25)</option>
+                            <?php $exStep(2, 'Hearing on the motion (KP Form #24)', $exSteps[2],
+                                $hasHearing ? ($ex['hearing_date'] > $today ? 'Scheduled for ' : 'Held on ') . date('M d, Y', strtotime($ex['hearing_date'])) : 'Set within 5 days of the motion: until ' . date('M d, Y', strtotime($ex['motion_date'] . ' +5 days')) . '.'); ?>
+                                <?php if (!$hasHearing): ?>
+                                <form method="POST" action="kp_execution.php" class="kp-hearing-form kp-ex-form">
+                                    <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                    <input type="hidden" name="action" value="schedule_hearing">
+                                    <?php kp_render_schedule_fields($defaultLocation, $ex['motion_date'], date('Y-m-d', strtotime($ex['motion_date'] . ' +5 days'))); ?>
+                                    <div class="kp-form-actions"><button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-calendar-alt"></i> Schedule Hearing</button></div>
+                                </form>
+                                <?php endif; ?>
+                            </div></div>
+
+                            <?php $exStep(3, 'Voluntary compliance (5 days after the hearing)', $exSteps[3],
+                                $complied ? 'The obliged party complied voluntarily.'
+                                    : ($noticeIssued ? 'Not complied. Notice of Execution (KP Form #25) issued ' . date('M d, Y', strtotime($ex['execution_issued_at'])) . (!empty($ex['amount']) ? ' for PHP ' . number_format((float)$ex['amount'], 2) : '') . '.'
+                                    : ($hasHearing ? 'The obliged party may still comply until ' . date('M d, Y', strtotime($ex['compliance_deadline'])) . '.' : ''))); ?>
+                                <?php if ($exSteps[3] === 'current'): ?>
+                                <div class="kp-ex-choices">
+                                    <form method="POST" action="kp_execution.php" class="kp-ex-choice">
+                                        <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                        <input type="hidden" name="action" value="complied">
+                                        <strong>The obliged party complied</strong>
+                                        <small>The settlement was carried out without enforcement. The case can then be closed.</small>
+                                        <textarea name="notes" rows="2" placeholder="Optional note, e.g. paid in full on Nov 3"></textarea>
+                                        <button type="submit" class="kp-btn kp-btn-outline kp-btn-sm"><i class="uil uil-check-circle"></i> Record Compliance</button>
+                                    </form>
+                                    <form method="POST" action="kp_execution.php" class="kp-ex-choice">
+                                        <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                        <input type="hidden" name="action" value="issue_notice">
+                                        <strong>Not complied: issue the Notice of Execution (KP Form #25)</strong>
+                                        <?php if ($compliancePassed): ?>
+                                        <small>Enter the amount still unpaid under the settlement<?= $exSettlement ? ': "' . htmlspecialchars(mb_strimwidth((string)$exSettlement['terms'], 0, 120, '…')) . '"' : '' ?>.</small>
+                                        <input type="text" name="amount" placeholder="Amount still unpaid, e.g. 5,000.00">
+                                        <textarea name="notes" rows="2" placeholder="Optional note"></textarea>
+                                        <button type="submit" class="kp-btn kp-btn-primary kp-btn-sm"><i class="uil uil-bolt"></i> Issue Notice of Execution</button>
+                                        <?php else: ?>
+                                        <small>Available after <?= date('M d, Y', strtotime($ex['compliance_deadline'])) ?>, when the 5 days for voluntary compliance have passed.</small>
                                         <?php endif; ?>
-                                        <?php if (!empty($latestExecution['execution_issued_at'])): ?>
-                                        <option value="mark_executed">Execution carried out</option>
-                                        <?php endif; ?>
-                                    </select>
+                                    </form>
                                 </div>
-                                <div class="kp-field"><label>Amount to be realized (for KP Form #25, if any)</label><input type="text" name="amount" placeholder="e.g. 5,000.00"></div>
-                                <div class="kp-field"><label>Notes</label><textarea name="notes" rows="3"></textarea></div>
-                                <div class="kp-form-actions"><button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-save"></i> Update Execution</button></div>
-                            </form>
+                                <?php endif; ?>
+                            </div></div>
 
-                        <?php elseif ($kpStatus === 'execution_completed'): ?>
-                            <div class="kp-info-box kp-info-success">
-                                <i class="uil uil-check-circle"></i>
-                                <div><strong>Execution Completed</strong><p>Close the case to record its disposition.</p></div>
-                            </div>
-                            <form method="POST" action="kp_execution.php" style="margin-top:12px;">
-                                <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
-                                <input type="hidden" name="action" value="close_case">
-                                <div class="kp-field"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
-                                <div class="kp-form-actions"><button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-archive"></i> Close Case</button></div>
-                            </form>
+                            <?php $exStep(4, 'Carry out the execution', $exSteps[4],
+                                $complied ? 'Not needed: the obliged party complied.'
+                                    : ($completed ? 'Execution carried out.' : ($noticeIssued ? 'Enforce the settlement by the Notice of Execution, then record it here.' : ''))); ?>
+                                <?php if ($exSteps[4] === 'current'): ?>
+                                <form method="POST" action="kp_execution.php" class="kp-ex-form">
+                                    <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                    <input type="hidden" name="action" value="mark_executed">
+                                    <div class="kp-field"><label>Notes</label><textarea name="notes" rows="2" placeholder="Optional, e.g. amount collected"></textarea></div>
+                                    <div class="kp-form-actions"><button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-check-circle"></i> Execution Carried Out</button></div>
+                                </form>
+                                <?php endif; ?>
+                            </div></div>
+
+                            <?php $exStep(5, 'Close the case', $exSteps[5], $completed ? 'Records the outcome: ' . ($complied ? 'settled and complied with' : 'settlement executed') . '.' : ''); ?>
+                                <?php if ($exSteps[5] === 'current'): ?>
+                                <form method="POST" action="kp_execution.php" class="kp-ex-form">
+                                    <input type="hidden" name="case_id" value="<?= (int)$case['id'] ?>">
+                                    <input type="hidden" name="action" value="close_case">
+                                    <div class="kp-field"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+                                    <div class="kp-form-actions"><button type="submit" class="kp-btn kp-btn-primary"><i class="uil uil-archive"></i> Close Case</button></div>
+                                </form>
+                                <?php endif; ?>
+                            </div></div>
+                        </div>
 
                         <?php else: ?>
                         <div class="kp-info-box">
@@ -1495,7 +2000,7 @@ $actionError = [
                         </div>
                         <?php endif; ?>
 
-                        <?php if (!empty($executions)): ?>
+                        <?php if (!empty($executions) && !in_array($kpStatus, ['execution_pending', 'execution_completed'], true)): ?>
                         <h4 class="kp-sub-title">Execution History</h4>
                         <?php foreach ($executions as $exec): ?>
                         <div class="kp-settlement-card">
@@ -1520,6 +2025,7 @@ $actionError = [
                 <div class="kp-tab-content" id="tab-disposition">
                     <div class="kp-section-card">
                         <h3 class="kp-section-title">Case Disposition</h3>
+                        <?php kp_render_step_forms([20, 21, 22, 23, 24], $stepFormsAvailable, $documents, (int)$case['id'], 'disposition'); ?>
                         <?php if (in_array($kpStatus, kp_terminal_statuses(), true)): ?>
                         <?php
                             $dispKey  = (string)($case['kp_disposition'] ?? '');
@@ -1687,9 +2193,22 @@ $actionError = [
 
 <script>
 // ── Tab Switching ──
+// "Meeting held": bring the members form (step 2) into view.
+function kpGoToPangkatForm() {
+    const form = document.getElementById('kpPangkatForm');
+    if (!form) return;
+    form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const first = form.querySelector('input[type="text"]');
+    if (first) setTimeout(() => first.focus({ preventScroll: true }), 400);
+}
+
 function switchTab(tabName) {
     const panel = document.getElementById(`tab-${tabName}`);
     if (!panel) return;
+    // The bar shows on the Overview, on the tab of the next step, and on the tab where an action was just completed.
+    document.querySelectorAll('.kp-next-bar').forEach(bar => { bar.hidden = tabName !== 'overview' && bar.dataset.nextTab !== tabName && tabName !== kpActionTab; });
+    document.querySelectorAll('.kp-next-go').forEach(b => { b.hidden = b.dataset.nextTab === tabName; });
+    document.querySelectorAll('.kp-next-where').forEach(w => { w.textContent = w.dataset.nextTab === tabName ? ' · on this tab' : ' · ' + w.dataset.label + ' tab'; });
     document.querySelectorAll('.kp-tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.kp-tab-content').forEach(t => t.classList.remove('active'));
     const btn = document.querySelector(`.kp-tab[data-tab="${tabName}"]`);
@@ -1725,7 +2244,9 @@ if (reviewDecision && missingField) {
 const hash = window.location.hash.replace('#', '');
 const requestedTab = <?= json_encode($requestedTab, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
 const initialTab = hash || requestedTab;
-if (initialTab) switchTab(initialTab);
+// Tab the page returned to after an action (a success message is shown).
+const kpActionTab = <?= $successMessage !== '' ? 'initialTab' : "''" ?>;
+switchTab(initialTab || 'overview');
 
 // ── Form confirmations (styled dialog from includes/header.php) ──
 // Searches and document generation do not change the case, so they skip this.
@@ -1733,6 +2254,7 @@ const kpConfirmTexts = {
     set_nature:           { title: 'Update the nature of the case?', message: 'This changes how the case is counted in the KP Monitoring Report.', confirmText: 'Update' },
     review:               { title: 'Submit this decision?', message: 'Decision: {choice}. The resident will see the updated status of the complaint in the app.', confirmText: 'Submit Decision' },
     schedule:             { title: 'Schedule this hearing?', message: 'The date, time and place will be saved to the case. Notices for this hearing can then be generated.', confirmText: 'Schedule' },
+    meeting_not_held:     { title: 'Mark the meeting as not held?', message: 'The meeting will be recorded as not held, and you can schedule it again.', confirmText: 'Mark Not Held' },
     schedule_explanation: { title: 'Schedule the explanation hearing?', message: 'The absent party will be given a chance to explain why they did not appear.', confirmText: 'Schedule' },
     record_outcome:       { title: 'Record this hearing outcome?', message: 'Outcome: {choice}. The case will move to the next step based on this outcome.', confirmText: 'Record Outcome' },
     record_service:       { title: 'Record service of the summons?', message: 'The date and manner of service will be printed on the Officer\'s Return.', confirmText: 'Record Service' },
@@ -1741,7 +2263,6 @@ const kpConfirmTexts = {
     record:               { title: 'Record the amicable settlement?', message: 'The 10-day repudiation period starts from the settlement date.', confirmText: 'Record Settlement' },
     repudiate:            { title: 'Record the repudiation?', message: 'The settlement will be set aside and the complainant will be certified to file the case in court (KP Form 20).', confirmText: 'Record Repudiation', danger: true },
     confirm_final:        { title: 'Confirm final and executory?', message: 'Confirm only if no repudiation was filed within the 10-day period. The settlement or award will then have the force of a final court judgment.', confirmText: 'Confirm Final' },
-    record_transmittal:   { title: 'Record the transmittal to court?', message: 'This records the date the settlement or award was sent to the city/municipal court.', confirmText: 'Record Transmittal' },
     agree:                { title: 'Record the agreement for arbitration?', message: 'Either party may repudiate the agreement within 5 days. The arbitration hearing can be scheduled after that period.', confirmText: 'Record Agreement' },
     repudiate_agreement:  { title: 'Record repudiation of the arbitration agreement?', message: 'The agreement will be set aside and the complainant will be certified to file the case in court.', confirmText: 'Record Repudiation', danger: true },
     award:                { title: 'Record the arbitration award?', message: 'The award becomes final after 10 days unless a petition to nullify it is filed in court.', confirmText: 'Record Award' },
@@ -1769,9 +2290,26 @@ function kpFormAction(form, submitter) {
 
 function kpSelectedChoice(form, action) {
     const name = action === 'record_outcome' ? 'outcome' : (action === 'review' ? 'decision' : 'action');
+    const radio = form.querySelector('input[type="radio"][name="' + name + '"]:checked');
+    if (radio) return radio.dataset.label || radio.value;
     const select = form.querySelector('select[name="' + name + '"]');
     return select && select.selectedIndex > 0 ? select.options[select.selectedIndex].text.trim() : '';
 }
+
+// Keep the scroll position when an action reloads the page.
+const kpScrollKey = 'kp-scroll:' + <?= (int)($case['id'] ?? 0) ?>;
+document.addEventListener('submit', e => {
+    if ((e.target.getAttribute('method') || 'get').toLowerCase() !== 'post') return;
+    try { sessionStorage.setItem(kpScrollKey, JSON.stringify({ y: window.scrollY, at: Date.now() })); } catch (err) {}
+}, true);
+window.addEventListener('load', () => {
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem(kpScrollKey) || 'null'); sessionStorage.removeItem(kpScrollKey); } catch (err) {}
+    if (saved && Date.now() - saved.at < 120000) {
+        window.scrollTo(0, saved.y);
+    }
+    document.querySelectorAll('.kp-toast[data-autohide]').forEach(t => setTimeout(() => t.remove(), 9000));
+});
 
 document.querySelectorAll('form').forEach(form => {
     if ((form.getAttribute('method') || 'get').toLowerCase() !== 'post') return;
@@ -1913,6 +2451,106 @@ document.querySelectorAll('form').forEach(form => {
 .kp-info-success i { color: #16a34a; }
 
 /* ── Narrative ── */
+.kp-update-tag { background: #fef3c7; color: #92400e; font-weight: 700; padding: 1px 6px; border-radius: 5px; }
+.kp-resident-updates { margin-top: 12px; border: 1px solid #fde68a; background: #fffbeb; border-radius: 10px; padding: 12px 14px; }
+.kp-ru-title { font-size: 13px; font-weight: 700; color: #92400e; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.kp-ru-item { padding: 8px 0; border-top: 1px dashed #fcd34d; }
+.kp-ru-title + .kp-ru-item { border-top: 0; padding-top: 0; }
+.kp-ru-date { display: inline-block; font-size: 11.5px; font-weight: 700; color: #92400e; background: #fef3c7; padding: 2px 8px; border-radius: 999px; margin-bottom: 5px; }
+.kp-ru-text { font-size: 13px; line-height: 1.6; color: #422006; }
+.kp-success-banner { display: flex; align-items: center; gap: 10px; padding: 12px 16px; margin-bottom: 14px; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; border-radius: 10px; font-size: 13.5px; font-weight: 600; }
+.kp-success-banner i { font-size: 20px; color: #059669; }
+.kp-success-banner > span { flex: 1; }
+.kp-toasts { position: fixed; right: 24px; bottom: 24px; z-index: 1200; display: flex; flex-direction: column; gap: 10px; max-width: min(460px, calc(100vw - 32px)); }
+.kp-toasts .kp-toast { margin: 0; box-shadow: 0 12px 32px rgba(15, 34, 66, .18); animation: kpToastIn .25s ease-out; }
+.kp-toasts .kp-error-card { display: flex; align-items: center; gap: 10px; text-align: left; padding: 12px 14px; border-color: #fecaca; background: #fef2f2; }
+.kp-toasts .kp-error-card i { font-size: 20px; margin: 0; display: inline; }
+.kp-toasts .kp-error-title { flex: 1; margin: 0; font-size: 13.5px; color: #7f1d1d; font-weight: 600; }
+.kp-toast-close { background: none; border: 0; padding: 2px; cursor: pointer; color: inherit; opacity: .6; font-size: 18px; line-height: 1; }
+.kp-toast-close:hover { opacity: 1; }
+.kp-toast-close i { font-size: 18px !important; color: inherit !important; }
+@keyframes kpToastIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.kp-fold { margin-top: 14px; border: 1px solid #e6edfa; border-radius: 12px; background: #fbfcff; }
+.kp-fold > summary { cursor: pointer; list-style: none; padding: 11px 14px; font-size: 13px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 6px; }
+.kp-fold > summary::-webkit-details-marker { display: none; }
+.kp-fold > summary i { color: #1f5bc4; }
+.kp-fold > summary span { margin-left: auto; font-size: 11.5px; font-weight: 600; color: #94a3b8; }
+.kp-fold > summary::after { content: '\25BE'; color: #94a3b8; transition: transform .15s; }
+.kp-fold[open] > summary::after { transform: rotate(180deg); }
+.kp-fold[open] > summary span { visibility: hidden; }
+.kp-fold-body { padding: 0 14px 14px; }
+.kp-past-hearings { margin-top: 14px; border: 1px solid #e6edfa; border-radius: 12px; background: #fbfcff; }
+.kp-past-hearings > summary { cursor: pointer; list-style: none; padding: 11px 14px; font-size: 13px; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 6px; }
+.kp-past-hearings > summary::-webkit-details-marker { display: none; }
+.kp-past-hearings > summary span { margin-left: auto; font-size: 11.5px; font-weight: 600; color: #94a3b8; }
+.kp-past-hearings > summary::after { content: '\25BE'; color: #94a3b8; transition: transform .15s; }
+.kp-past-hearings[open] > summary::after { transform: rotate(180deg); }
+.kp-past-hearings > .kp-hearing-list { padding: 0 12px 12px; }
+.kp-moved-on { border-left: 3px solid #1f5bc4; }
+.kp-next-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 14px; padding: 12px 16px; background: #f2f6ff; border: 1px solid #c7d7f5; border-left: 4px solid #1f5bc4; border-radius: 12px; scroll-margin-top: 90px; }
+.kp-next-bar > i { font-size: 22px; color: #1f5bc4; }
+.kp-next-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.kp-next-text > span { font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #1f5bc4; }
+.kp-next-where { font-weight: 700; letter-spacing: 0; text-transform: none; color: #64748b; }
+.kp-next-text strong { font-size: 14px; color: #0f2242; }
+.kp-next-done { background: #ecfdf5; border-color: #a7f3d0; border-left-color: #059669; }
+.kp-next-done > i, .kp-next-done .kp-next-text > span { color: #047857; }
+.kp-next-bar .kp-btn i { color: #fff; }
+.kp-next-bar[hidden], .kp-next-go[hidden] { display: none !important; }
+.kp-ex-steps { display: flex; flex-direction: column; gap: 0; position: relative; }
+.kp-ex-step { display: flex; gap: 12px; position: relative; padding-bottom: 16px; }
+.kp-ex-step:not(:last-child)::before { content: ''; position: absolute; left: 14px; top: 30px; bottom: 0; width: 2px; background: #e6edfa; }
+.kp-ex-num { flex: 0 0 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 800; background: #eef2f8; color: #94a3b8; position: relative; z-index: 1; }
+.kp-ex-done .kp-ex-num { background: #dcfce7; color: #15803d; }
+.kp-ex-current .kp-ex-num { background: #1f5bc4; color: #fff; box-shadow: 0 0 0 4px #e7effd; }
+.kp-ex-skipped .kp-ex-num { background: #f1f5f9; color: #94a3b8; }
+.kp-ex-main { flex: 1; min-width: 0; padding-top: 4px; }
+.kp-ex-title { font-size: 13.5px; font-weight: 700; color: #1e293b; }
+.kp-ex-todo .kp-ex-title, .kp-ex-skipped .kp-ex-title { color: #94a3b8; }
+.kp-ex-meta { font-size: 12.5px; color: #64748b; margin-top: 2px; }
+.kp-ex-current .kp-ex-main { padding: 10px 12px; border: 1px solid #c7d7f5; background: #fbfcff; border-radius: 10px; }
+.kp-ex-form { margin-top: 10px; }
+.kp-ex-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px; margin-top: 10px; }
+.kp-ex-choice { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid #dfe6f2; border-radius: 10px; background: #fff; }
+.kp-ex-choice strong { font-size: 13px; color: #1e293b; }
+.kp-ex-choice small { font-size: 12px; color: #64748b; line-height: 1.45; }
+.kp-ex-choice input[type=text], .kp-ex-choice textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 7px 9px; border: 1.5px solid #d6deea; border-radius: 8px; }
+.kp-ex-choice .kp-btn { align-self: flex-start; }
+.kp-meeting-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.kp-meeting-choices form { margin: 0; }
+.kp-meeting-choices .kp-btn-primary i { color: #fff !important; }
+.kp-info-box .kp-btn-primary i, .kp-success-banner .kp-btn-primary i { color: #fff !important; font-size: 16px !important; margin: 0 !important; }
+.kp-info-box .kp-btn-outline i { color: inherit; font-size: 16px; margin: 0; }
+.kp-toast-close { order: 3; }
+.kp-step-forms { border: 1px solid #dbe6fb; background: #f5f8ff; border-radius: 12px; padding: 12px 14px; margin-bottom: 16px; }
+.kp-step-forms-title { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #1f5bc4; display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+.kp-step-forms-list { display: flex; flex-direction: column; gap: 6px; }
+.kp-step-form { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; background: #fff; border: 1px solid #e6edfa; border-radius: 9px; }
+.kp-step-form strong { font-size: 13px; color: #1e293b; margin-right: 8px; }
+.kp-step-form span { font-size: 12.5px; color: #64748b; }
+.kp-step-form-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.kp-step-form-later { background: #f8fafc; border-style: dashed; }
+.kp-step-form-later strong, .kp-step-form-later span { color: #94a3b8 !important; }
+.kp-step-form-when { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: #64748b; }
+.kp-hearing-pending { flex-wrap: wrap; border-color: #c7d7f5 !important; background: #fbfcff !important; }
+.kp-hearing-waiting { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11.5px; font-weight: 700; color: #b45309; background: #fef3c7; padding: 2px 8px; border-radius: 999px; }
+.kp-outcome-form { flex-basis: 100%; border-top: 1px solid #e6edfa; padding-top: 12px; margin-top: 2px; }
+.kp-outcome-heading { font-size: 13px; font-weight: 700; color: #1e293b; margin-bottom: 8px; }
+.kp-outcome-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; }
+.kp-outcome-opt { cursor: pointer; display: block; }
+.kp-outcome-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.kp-outcome-card { display: flex; flex-direction: column; gap: 4px; height: 100%; padding: 10px 12px 10px 34px; position: relative; background: #fff; border: 1.5px solid #dfe6f2; border-radius: 10px; transition: border-color .15s, background .15s, box-shadow .15s; }
+.kp-outcome-card::before { content: ''; position: absolute; left: 12px; top: 12px; width: 14px; height: 14px; border-radius: 50%; border: 2px solid #b6c3d8; background: #fff; transition: border-color .15s, box-shadow .15s; }
+.kp-outcome-card strong { font-size: 13px; color: #1e293b; }
+.kp-outcome-card small { font-size: 12px; line-height: 1.45; color: #64748b; }
+.kp-outcome-opt:hover .kp-outcome-card { border-color: #9db8ea; }
+.kp-outcome-opt input:focus-visible + .kp-outcome-card { box-shadow: 0 0 0 3px rgba(31, 91, 196, .2); }
+.kp-outcome-opt input:checked + .kp-outcome-card { border-color: #1f5bc4; background: #f2f6ff; box-shadow: 0 2px 10px rgba(31, 91, 196, .12); }
+.kp-outcome-opt input:checked + .kp-outcome-card::before { border-color: #1f5bc4; box-shadow: inset 0 0 0 3px #fff; background: #1f5bc4; }
+.kp-outcome-form .kp-form-actions { margin-top: 10px; }
+.kp-service-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.kp-service-row { font-size: 13px; color: #334155; padding: 8px 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 9px; }
+.kp-service-row i { color: #16a34a; }
 .kp-narrative { font-size: 13px; line-height: 1.65; color: #374151; padding: 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #f1f5f9; }
 
 /* ── Review History ── */
@@ -1921,6 +2559,30 @@ document.querySelectorAll('form').forEach(form => {
 .kp-review-decision { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
 .kp-review-date { font-size: 11px; color: #94a3b8; }
 .kp-review-notes { font-size: 12px; color: #475569; margin-top: 6px; }
+.kp-rh-count { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #eef2f8; color: #64748b; font-size: 11.5px; font-weight: 700; vertical-align: middle; }
+.kp-rh { list-style: none; margin: 0; padding: 0; position: relative; }
+.kp-rh::before { content: ''; position: absolute; left: 15px; top: 8px; bottom: 8px; width: 2px; background: #e6edfa; }
+.kp-rh-item { position: relative; display: flex; gap: 12px; padding: 0 0 14px; }
+.kp-rh-item:last-child { padding-bottom: 4px; }
+.kp-rh-dot { position: relative; z-index: 1; flex: 0 0 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+.kp-rh-barangay .kp-rh-dot { background: #e7effd; color: #1f5bc4; }
+.kp-rh-resident .kp-rh-dot { background: #fef3c7; color: #b45309; }
+.kp-rh-body { flex: 1; min-width: 0; padding: 9px 12px; border-radius: 10px; border: 1px solid #edf1f7; background: #fff; }
+.kp-rh-resident .kp-rh-body { background: #fffdf5; border-color: #fbe7b0; }
+.kp-rh-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.kp-rh-head strong { font-size: 13.5px; color: #1e293b; }
+.kp-rh-who { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: #94a3b8; }
+.kp-rh-head time { margin-left: auto; font-size: 11.5px; color: #94a3b8; white-space: nowrap; }
+.kp-rh-text { margin-top: 4px; font-size: 13px; line-height: 1.5; color: #475569; }
+.kp-rh-required { margin-top: 6px; font-size: 13px; color: #9f1239; background: #fff1f2; border-radius: 7px; padding: 6px 9px; }
+.kp-rh-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.kp-rh-files a { display: inline-flex; align-items: center; gap: 4px; max-width: 230px; font-size: 12px; font-weight: 600; color: #1d4ed8; text-decoration: none; padding: 3px 9px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 999px; }
+.kp-rh-files a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-rh-files a:hover { background: #dbeafe; }
+.kp-rh-more { margin-top: 2px; }
+.kp-rh-more > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 12px 44px; font-size: 12.5px; font-weight: 700; color: #1f5bc4; }
+.kp-rh-more > summary::-webkit-details-marker { display: none; }
+.kp-rh-more[open] > summary { display: none; }
 .kp-review-missing { font-size: 12px; color: #b91c1c; margin-top: 6px; padding: 8px; background: #fff1f2; border-radius: 6px; }
 
 /* ── Hearing List ── */

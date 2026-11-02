@@ -1,5 +1,6 @@
 /config/gemini.local.php
 /config/mail.local.php
+/config/kp.local.php
 
 # Residents' private files (uploads and generated KP forms stay on the server only)
 /storage/case_evidence/

@@ -173,7 +173,10 @@ if ($action === 'generate') {
             $userId
         );
 
-        header("Location: {$redirect}&generated={$formNumber}#documents");
+        // Stay on the tab the form was generated from ("Forms for this step").
+        $returnTab = preg_replace('/[^a-z]/', '', (string)($_POST['return_tab'] ?? ''));
+        $returnTab = $returnTab !== '' ? $returnTab : 'documents';
+        header("Location: {$redirect}&generated={$formNumber}&tab={$returnTab}#{$returnTab}");
         exit();
     } else {
         // Template not found or generation failed

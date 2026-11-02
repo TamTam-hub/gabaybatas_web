@@ -132,7 +132,7 @@ switch ($action) {
         if (!in_array($kpStatus, ['settlement_repudiation', 'arbitration_awarded'], true) || !$settlement) {
             $fail('invalid_stage');
         }
-        if ($today <= $settlement['repudiation_deadline']) {
+        if (!kp_period_over($settlement['repudiation_deadline'])) {
             $fail('finality_period_open');
         }
         if (!kp_transition_case($conn, $caseId, 'settlement_final')) {
@@ -154,34 +154,9 @@ switch ($action) {
         break;
 
     // ── Transmittal to the city/municipal court (LGC Sec. 419: within 5 days) ──
-    case 'record_transmittal':
-        $transmittedOn = trim($_POST['transmitted_on'] ?? '');
-        $settlementId  = (int)($_POST['settlement_id'] ?? 0);
-        $row = $conn->query("SELECT * FROM kp_settlements WHERE id = {$settlementId} AND case_id = {$caseId} AND repudiated = 0 LIMIT 1")->fetch_assoc();
-        if (!$row || !empty($row['transmitted_at'])) {
-            $fail('invalid_stage');
-        }
-        $isAward = $row['settlement_type'] === 'arbitration_award';
-        // A settlement is transmitted once its repudiation period ends; an award once rendered.
-        $earliest = $isAward ? $row['settlement_date'] : date('Y-m-d', strtotime($row['repudiation_deadline'] . ' +1 day'));
-        if ($transmittedOn === '' || $transmittedOn > $today || $transmittedOn < $earliest) {
-            $fail('invalid_input');
-        }
-
-        $upd = $conn->prepare("UPDATE kp_settlements SET transmitted_at = ? WHERE id = ? LIMIT 1");
-        $upd->bind_param('si', $transmittedOn, $settlementId);
-        $upd->execute();
-        $upd->close();
-
-        kp_log_event($conn, $caseId, 'settlement', $kpStatus, 'transmitted_to_court',
-            ($isAward ? 'Arbitration Award' : 'Amicable Settlement') . ' transmitted to the city court',
-            'Transmitted on ' . date('M d, Y', strtotime($transmittedOn)),
-            $userId);
-        break;
-
     default:
         break;
 }
 
-header("Location: case_process.php?id={$caseId}#settlement");
+header("Location: case_process.php?id={$caseId}&saved=1#settlement");
 exit();

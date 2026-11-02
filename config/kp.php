@@ -21,6 +21,15 @@ define('KP_LUPON_SECRETARY',   'CRISTEL VALLES');
 // System administrator; signs as "Prepared by" on reports generated from the admin pages.
 define('GABAYBATAS_ADMIN_NAME', 'CHRISTIAN B. ALBOS');
 
+// Testing only: config/kp.local.php (kept out of git) may define KP_SKIP_WAITING_PERIODS
+// as true so actions that wait for a legal period (5 days, 10 days, 6 months) open at once.
+if (is_file(__DIR__ . '/kp.local.php')) {
+    require_once __DIR__ . '/kp.local.php';
+}
+if (!defined('KP_SKIP_WAITING_PERIODS')) {
+    define('KP_SKIP_WAITING_PERIODS', false);
+}
+
 // ─── KP Status Definitions ──────────────────────────────────────────────────
 // Each KP status maps to the existing cases.status enum value.
 
@@ -248,6 +257,88 @@ if (!function_exists('kp_case_nature')) {
     {
         $nature = (string)($case['kp_nature'] ?? '');
         return array_key_exists($nature, kp_case_natures()) ? $nature : kp_suggest_nature((string)($case['case_type'] ?? ''));
+    }
+}
+
+if (!function_exists('kp_resident_update_text')) {
+    /**
+     * A resident's update as shown to staff and in the app: one item per line,
+     * and only the new complaint reason (the earlier one is left out).
+     */
+    function kp_resident_update_text(string $details): string
+    {
+        $lines = [];
+        foreach (preg_split('/\R/', str_replace(' | ', "\n", $details)) as $line) {
+            $line = trim($line);
+            if ($line === '' || $line === 'Complaint reason updated.' || str_starts_with($line, 'Before: ')) {
+                continue;
+            }
+            $lines[] = str_starts_with($line, 'Now: ') ? 'New reason: ' . substr($line, 5) : $line;
+        }
+        return implode("\n", $lines);
+    }
+}
+
+if (!function_exists('kp_resident_status_message')) {
+    /**
+     * What the current status means for the resident (the complainant), in
+     * plain words, shown in the app's Track Your Case.
+     */
+    function kp_resident_status_message(string $status, ?string $disposition, string $stage = '', array $context = []): string
+    {
+        // Choosing the Pangkat depends on how far it has gone and why mediation ended.
+        if ($status === 'pangkat_constitution') {
+            $members = (string)($context['pangkat_members'] ?? '');
+            if ($members !== '') {
+                return "The Pangkat has been chosen: {$members}. They will call you and the respondent to the first conciliation hearing, usually within 3 days.";
+            }
+            $why = ($context['mediation_outcome'] ?? '') === 'respondent_absent'
+                ? 'The respondent did not attend the mediation hearing, so mediation before the Punong Barangay has ended.'
+                : 'Mediation before the Punong Barangay did not settle the dispute.';
+            return $why . ' The next step is a meeting to choose the Pangkat, a panel of 3 Lupon members who will hear your case.';
+        }
+
+        $forum = $stage === 'conciliation' ? 'the Pangkat' : 'the Punong Barangay';
+        $byDisposition = [
+            'not_covered'                => 'Your complaint is not covered by the barangay justice system (Katarungang Pambarangay), so the barangay cannot hear it. See below where you were referred.',
+            'settled_complied'           => 'The case is closed. The settlement was carried out.',
+            'executed'                   => 'The case is closed. The barangay enforced the settlement.',
+            'execution_lapsed_mtc'       => 'The case is closed at the barangay. The 6 months for barangay enforcement have passed; you may ask the city court to enforce the settlement.',
+            'cfa_settlement_repudiated'  => 'The settlement was withdrawn (repudiated) within 10 days. The barangay issued a Certification to File Action, so you may now file your complaint in court.',
+            'cfa_arbitration_repudiated' => 'The agreement to let the barangay decide was withdrawn within 5 days. The barangay issued a Certification to File Action, so you may now file your complaint in court.',
+            'cfa_conciliation_failed'    => 'No settlement was reached before the Pangkat. The barangay issued a Certification to File Action, so you may now file your complaint in court.',
+            'cfa_respondent_absent'      => 'The respondent did not attend the hearings and gave no valid reason. You may now file your complaint in court (Certification to File Action), and the respondent can no longer file a counterclaim.',
+            'barred_complainant_absent'  => "Your complaint was dismissed because you did not attend the hearing before {$forum} and your reason for being absent was not accepted. You can no longer file this complaint in court (Certification to Bar Action).",
+        ];
+        if ($disposition !== null && isset($byDisposition[$disposition])) {
+            return $byDisposition[$disposition];
+        }
+        return [
+            'filed'                           => 'Your complaint was received. The barangay will review it.',
+            'under_review'                    => 'The barangay is reviewing your complaint.',
+            'additional_info_required'        => 'The barangay needs more information. Open the case and send what they asked for.',
+            'accepted'                        => 'Your complaint was accepted. The barangay will set a mediation hearing and send a notice to you and the respondent.',
+            'mediation_scheduled'             => 'Mediation before the Punong Barangay is scheduled. Attend every hearing; missing one without a good reason can get your complaint dismissed.',
+            'mediation_ongoing'               => 'Mediation before the Punong Barangay is ongoing. Attend every hearing; missing one without a good reason can get your complaint dismissed.',
+            'mediation_noshow_complainant'    => 'You did not attend the mediation hearing. You must come to a hearing to explain why. If your reason is not accepted, your complaint will be dismissed.',
+            'mediation_settled'               => 'You and the respondent reached a settlement at mediation. The barangay will write down the terms.',
+            'conciliation_scheduled'          => 'The Pangkat will hear your case. Attend every hearing; missing one without a good reason can get your complaint dismissed.',
+            'conciliation_ongoing'            => 'The Pangkat is hearing your case. Attend every hearing; missing one without a good reason can get your complaint dismissed.',
+            'conciliation_noshow_complainant' => 'You did not attend the Pangkat hearing. You must come to a hearing to explain why. If your reason is not accepted, your complaint will be dismissed.',
+            'conciliation_noshow_respondent'  => 'The respondent did not attend the Pangkat hearing and is being asked to explain why.',
+            'conciliation_settled'            => 'You and the respondent reached a settlement before the Pangkat. The barangay will write down the terms.',
+            'arbitration_agreed'              => 'You and the respondent agreed to let the barangay decide the dispute (arbitration). Either of you may withdraw within 5 days, but only for fraud, violence or intimidation.',
+            'arbitration_hearing'             => 'Arbitration hearings are ongoing. Both sides present their evidence before a decision is made.',
+            'arbitration_awarded'             => 'The barangay has decided the dispute (arbitration award). It becomes final after 10 days.',
+            'settlement_repudiation'          => 'The settlement is recorded. Either party may withdraw it within 10 days, but only for fraud, violence or intimidation. After that it becomes final.',
+            'settlement_final'                => 'The settlement is final and now has the force of a court judgment.',
+            'compliance_monitoring'           => 'The barangay is checking that the agreed terms are carried out.',
+            'execution_pending'               => 'The terms were not followed, so the barangay is enforcing the settlement.',
+            'execution_completed'             => 'The barangay has enforced the settlement.',
+            'dismissed'                       => 'Your complaint was dismissed.',
+            'certified_to_court'              => 'The barangay issued a Certification to File Action. You may now file your complaint in court.',
+            'closed'                          => 'The case is closed.',
+        ][$status] ?? '';
     }
 }
 
@@ -657,6 +748,14 @@ if (!function_exists('kp_deadlines')) {
             'execution_by_lupon_max_months'        => 6,    // 6 months max for Lupon execution
             'monthly_report_due_day'               => 5,    // First 5 days of each month
         ];
+    }
+}
+
+if (!function_exists('kp_period_over')) {
+    /** True once $lastDay has passed (or always, while waiting periods are skipped for testing). */
+    function kp_period_over(?string $lastDay): bool
+    {
+        return KP_SKIP_WAITING_PERIODS || ($lastDay !== null && $lastDay !== '' && date('Y-m-d') > $lastDay);
     }
 }
 

@@ -56,6 +56,14 @@ $executionLimit = $finalSettlement
 
 $execution = $conn->query("SELECT * FROM kp_executions WHERE case_id = {$caseId} ORDER BY id DESC LIMIT 1")->fetch_assoc();
 
+// The hearing on the motion ends once compliance or the Notice of Execution is recorded.
+$closeExecutionHearing = static function (string $outcome) use ($conn, $caseId): void {
+    $stmt = $conn->prepare("UPDATE kp_hearings SET outcome = ? WHERE case_id = ? AND stage = 'execution' AND (outcome IS NULL OR outcome = '')");
+    $stmt->bind_param('si', $outcome, $caseId);
+    $stmt->execute();
+    $stmt->close();
+};
+
 switch ($action) {
     // ── KP Form 25 ──
     case 'file_motion':
@@ -92,7 +100,7 @@ switch ($action) {
 
     // ── 6-month period lapsed without execution: enforce by motion in the MTC ──
     case 'close_lapsed':
-        if ($kpStatus !== 'compliance_monitoring' || !$finalSettlement || $today <= $executionLimit) {
+        if ($kpStatus !== 'compliance_monitoring' || !$finalSettlement || !kp_period_over($executionLimit)) {
             $fail('invalid_stage');
         }
         if (kp_transition_case($conn, $caseId, 'closed', 'execution_lapsed_mtc')) {
@@ -149,6 +157,7 @@ switch ($action) {
         if (kp_transition_case($conn, $caseId, 'execution_completed')) {
             $executionId = (int)$execution['id'];
             $conn->query("UPDATE kp_executions SET voluntary_compliance = 1, status = 'complied' WHERE id = {$executionId} LIMIT 1");
+            $closeExecutionHearing('Obliged party complied');
             kp_log_event($conn, $caseId, 'execution', 'execution_completed', 'execution_completed',
                 'Obliged party complied voluntarily', $notes, $userId);
         }
@@ -160,7 +169,7 @@ switch ($action) {
         if ($kpStatus !== 'execution_pending' || !$execution || empty($execution['compliance_deadline'])) {
             $fail('invalid_stage');
         }
-        if ($today <= $execution['compliance_deadline']) {
+        if (!kp_period_over($execution['compliance_deadline'])) {
             $fail('compliance_period_open');
         }
         $amountValue = $amount === '' ? null : (float)str_replace(',', '', $amount);
@@ -169,6 +178,7 @@ switch ($action) {
         $upd->bind_param('sdi', $now, $amountValue, $executionId);
         $upd->execute();
         $upd->close();
+        $closeExecutionHearing('Not complied: Notice of Execution issued');
 
         kp_log_event($conn, $caseId, 'execution', 'execution_pending', 'execution_notice',
             'Notice of Execution issued',
@@ -206,5 +216,5 @@ switch ($action) {
         break;
 }
 
-header("Location: case_process.php?id={$caseId}#execution");
+header("Location: case_process.php?id={$caseId}&saved=1#execution");
 exit();

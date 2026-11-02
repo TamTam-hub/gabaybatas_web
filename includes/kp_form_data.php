@@ -137,6 +137,28 @@ if (!function_exists('kp_find_by_id')) {
     }
 }
 
+if (!function_exists('kp_centered_on_line')) {
+    /**
+     * Text centred on an underlined blank as long as $underscores underscores,
+     * padded with non-breaking spaces (approximate Calibri Bold widths). The
+     * template underlines the placeholder's run, so the line stays visible.
+     */
+    function kp_centered_on_line(string $text, int $underscores): string
+    {
+        $widths = ['I' => 267, 'J' => 331, 'L' => 423, 'F' => 459, 'S' => 473, 'Z' => 478, 'E' => 488, 'T' => 495, 'Y' => 520,
+                   'C' => 529, 'P' => 532, 'K' => 547, 'X' => 551, 'B' => 561, 'R' => 563, 'V' => 591, 'A' => 606, 'D' => 630,
+                   'H' => 631, 'G' => 637, 'U' => 653, 'N' => 659, 'Ñ' => 659, 'O' => 676, 'Q' => 686, 'M' => 874, 'W' => 906,
+                   ' ' => 226, '.' => 267, ',' => 258, '-' => 306, "'" => 230];
+        $textWidth = 0;
+        foreach (mb_str_split($text) as $char) {
+            $textWidth += $widths[$char] ?? 560;
+        }
+        $spaces = max(2, (int)round(($underscores * 498 - $textWidth) / 226));
+        $left = intdiv($spaces, 2);
+        return str_repeat("\u{00A0}", $left) . $text . str_repeat("\u{00A0}", $spaces - $left);
+    }
+}
+
 if (!function_exists('kp_build_form_data')) {
     /**
      * Placeholder values for a KP form.
@@ -199,7 +221,8 @@ if (!function_exists('kp_build_form_data')) {
                 $modes = ['personal' => 1, 'refused' => 2, 'left_at_dwelling' => 3, 'left_at_office' => 4];
                 $usedMode = $modes[$service['service_method'] ?? ''] ?? 0;
                 foreach ($modes as $mode => $n) {
-                    $data["served_mode_{$n}"] = $n === $usedMode ? $respondent : str_repeat('_', $n === 3 ? 29 : ($n === 4 ? 30 : 28));
+                    $blank = $n === 3 ? 29 : ($n === 4 ? 30 : 28);
+                    $data["served_mode_{$n}"] = $n === $usedMode ? kp_centered_on_line(mb_strtoupper((string)($case['complained_person'] ?? '')), $blank) : str_repeat('_', $blank);
                 }
                 $receiver = strtoupper(trim((string)($service['received_by'] ?? '')));
                 $data['dwelling_receiver'] = $usedMode === 3 && $receiver !== '' ? $receiver : str_repeat('_', 40);
@@ -323,14 +346,14 @@ if (!function_exists('kp_build_form_data')) {
                 }
                 $presiding = kp_presiding_officer($stage, $officers);
                 $parts = kp_date_parts($repudiation['sworn_date']);
-                $party = strtoupper((string)$repudiation['party_name']);
+                $party = mb_strtoupper((string)$repudiation['party_name']);
                 $data += [
                     'repudiation_object'      => $isAgreement ? 'agreement for arbitration' : 'settlement',
                     'sworn_day'               => $parts['day'],
                     'sworn_month'             => $parts['month'],
                     'sworn_year'              => $parts['year'],
-                    'repudiating_complainant' => $repudiation['party_role'] === 'complainant' ? $party : '',
-                    'repudiating_respondent'  => $repudiation['party_role'] === 'respondent' ? $party : '',
+                    'repudiating_role'        => $repudiation['party_role'] === 'respondent' ? 'Respondent/s' : 'Complainant/s',
+                    'repudiating_party'       => $party,
                     'presiding_name'          => $presiding['name'],
                     'presiding_title'         => $presiding['title'],
                 ];

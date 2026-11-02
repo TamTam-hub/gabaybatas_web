@@ -74,5 +74,5 @@ switch ($action) {
         break;
 }
 
-header("Location: case_process.php?id={$caseId}#{$tab}");
+header("Location: case_process.php?id={$caseId}&saved=1#{$tab}");
 exit();

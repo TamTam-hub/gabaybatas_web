@@ -110,10 +110,27 @@ if ($action === 'schedule') {
         if (!$agr) {
             $fail('agreement_required', $tab);
         }
-        if ($today <= $agr['repudiation_deadline'] || $hearingDate <= $agr['repudiation_deadline']) {
+        if (!KP_SKIP_WAITING_PERIODS && ($today <= $agr['repudiation_deadline'] || $hearingDate <= $agr['repudiation_deadline'])) {
             $fail('agreement_window_open', $tab);
         }
+        // Once the case is submitted for award, the next step is the award, not another hearing.
+        $submitted = $conn->query("SELECT COUNT(*) AS n FROM kp_hearings WHERE case_id = {$caseId} AND stage = 'arbitration' AND outcome = 'Submitted for award'")->fetch_assoc();
+        if ((int)$submitted['n'] > 0) {
+            $fail('invalid_stage', $tab);
+        }
         $newStatus = 'arbitration_hearing';
+    }
+
+    // One hearing (or constitution meeting) at a time: a new one is set only after the last one has an outcome.
+    if (in_array($purposeType, ['regular', 'pangkat_constitution'], true)) {
+        $pendingStmt = $conn->prepare("SELECT COUNT(*) AS n FROM kp_hearings WHERE case_id = ? AND stage = ? AND purpose_type = ? AND (outcome IS NULL OR outcome = '')");
+        $pendingStmt->bind_param('iss', $caseId, $stage, $purposeType);
+        $pendingStmt->execute();
+        $hasPending = (int)$pendingStmt->get_result()->fetch_assoc()['n'] > 0;
+        $pendingStmt->close();
+        if ($hasPending) {
+            $fail('hearing_pending', $tab);
+        }
     }
 
     if ($newStatus !== null && $newStatus !== $kpStatus && !kp_transition_case($conn, $caseId, $newStatus)) {
@@ -174,7 +191,7 @@ if ($action === 'schedule_explanation') {
 }
 
 // ═══ ACTION: Record Outcome ═══
-if ($action === 'record_outcome') {
+if ($action === 'record_outcome' || $action === 'meeting_not_held') {
     $hearingId = (int)($_POST['hearing_id'] ?? 0);
     $outcomeKey = trim($_POST['outcome'] ?? '');
 
@@ -217,7 +234,8 @@ if ($action === 'record_outcome') {
         ];
     } elseif ($purposeType === 'pangkat_constitution') {
         $rules = [
-            'held' => ['Meeting held', null, null, null],
+            'held'     => ['Meeting held', null, null, null],
+            'not_held' => ['Meeting not held', null, null, null],
         ];
     } elseif ($purposeType === 'explanation_complainant') {
         $rules = [
@@ -307,7 +325,7 @@ if ($action === 'record_service') {
         'Served ' . date('M d, Y', strtotime($servedDate)) . ' — ' . $methodLabels[$method] . ($receivedBy !== '' ? " (received by {$receivedBy})" : ''),
         $userId);
 
-    header("Location: case_process.php?id={$caseId}#mediation");
+    header("Location: case_process.php?id={$caseId}&saved=service#mediation");
     exit();
 }
 
@@ -332,7 +350,7 @@ if ($action === 'extend_conciliation') {
         "New end of period: " . date('M d, Y', strtotime($newDeadline)) . "\nReason: {$reason}",
         $userId);
 
-    header("Location: case_process.php?id={$caseId}#conciliation");
+    header("Location: case_process.php?id={$caseId}&saved=1#conciliation");
     exit();
 }
 

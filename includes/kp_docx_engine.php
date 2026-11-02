@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../config/kp.php';
+require_once __DIR__ . '/../config/case_types.php';
 
 use PhpOffice\PhpWord\TemplateProcessor;
 
@@ -201,6 +202,29 @@ if (!function_exists('kp_apply_template_blocks')) {
 
 // ─── Template Data Builder ───────────────────────────────────────────────────
 
+if (!function_exists('kp_document_narrative')) {
+    /**
+     * The complaint statement as printed on the forms: the names of the
+     * complainant and the respondent are written in capital letters.
+     */
+    function kp_document_narrative(string $description): string
+    {
+        $statement = gabaybatas_parse_complaint_statement($description);
+        if (!$statement) {
+            return $description;
+        }
+        $text = gabaybatas_complaint_statement(
+            mb_strtoupper($statement['name']),
+            $statement['age'],
+            $statement['area'],
+            mb_strtoupper($statement['respondent']),
+            $statement['respondent_area'],
+            $statement['reason']
+        );
+        return $statement['extra'] !== '' ? $text . "\n\n" . $statement['extra'] : $text;
+    }
+}
+
 if (!function_exists('kp_build_template_data')) {
     /**
      * Build the placeholder → value map for a given case.
@@ -227,22 +251,22 @@ if (!function_exists('kp_build_template_data')) {
             'case_type'           => $case['case_type'] ?? '',
 
             // ── Complainant ──
-            'complainant_name'    => strtoupper($case['name'] ?? ''),
+            'complainant_name'    => mb_strtoupper($case['name'] ?? ''),
             'complainant_address' => kp_format_document_address(
-                strtoupper($case['complainant_address'] ?? ($case['complainant_purok'] ?? ''))
+                mb_strtoupper($case['complainant_address'] ?? ($case['complainant_purok'] ?? ''))
             ),
             'complainant_age'     => (string)($case['complainant_age'] ?? $case['age'] ?? ''),
             'complainant_purok'   => $case['complainant_purok'] ?? '',
 
             // ── Respondent ──
-            'respondent_name'     => strtoupper($case['complained_person'] ?? ''),
+            'respondent_name'     => mb_strtoupper($case['complained_person'] ?? ''),
             'respondent_address'  => kp_format_document_address(
-                strtoupper($case['respondent_address'] ?? ($case['respondent_purok'] ?? ''))
+                mb_strtoupper($case['respondent_address'] ?? ($case['respondent_purok'] ?? ''))
             ),
             'respondent_purok'    => $case['respondent_purok'] ?? '',
 
             // ── Description ──
-            'complaint_narrative' => $case['description'] ?? '',
+            'complaint_narrative' => kp_document_narrative((string)($case['description'] ?? '')),
             'relief_sought'       => $case['relief_sought'] ?? '',
 
             // ── Dates ──

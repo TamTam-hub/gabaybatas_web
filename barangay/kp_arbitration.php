@@ -156,7 +156,7 @@ switch ($action) {
         if (!$lastHearing) {
             $fail('award_hearing_required');
         }
-        if ($awardDate <= $agreement['repudiation_deadline'] || $awardDate < $lastHearing) {
+        if ((!KP_SKIP_WAITING_PERIODS && $awardDate <= $agreement['repudiation_deadline']) || $awardDate < $lastHearing) {
             $fail('award_too_early');
         }
         if (!kp_transition_case($conn, $caseId, 'arbitration_awarded')) {
@@ -187,5 +187,5 @@ switch ($action) {
         break;
 }
 
-header("Location: case_process.php?id={$caseId}#arbitration");
+header("Location: case_process.php?id={$caseId}&saved=1#arbitration");
 exit();
