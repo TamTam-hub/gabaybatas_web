@@ -22,8 +22,9 @@ if (!function_exists('gabaybatas_favicon_links')) {
     function gabaybatas_favicon_links(string $base = ''): string
     {
         $base = htmlspecialchars($base, ENT_QUOTES);
-        return '<link rel="icon" type="image/svg+xml" href="' . $base . 'images/favicon.svg">'
-            . '<link rel="icon" type="image/png" sizes="32x32" href="' . $base . 'images/favicon-32.png">'
-            . '<link rel="apple-touch-icon" href="' . $base . 'images/apple-touch-icon.png">';
+        $v = '?v=2'; // raise when the icons change, so browsers and the host's cache fetch the new ones
+        return '<link rel="icon" type="image/svg+xml" href="' . $base . 'images/favicon.svg' . $v . '">'
+            . '<link rel="icon" type="image/png" sizes="32x32" href="' . $base . 'images/favicon-32.png' . $v . '">'
+            . '<link rel="apple-touch-icon" href="' . $base . 'images/apple-touch-icon.png' . $v . '">';
     }
 }
