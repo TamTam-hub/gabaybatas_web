@@ -48,6 +48,8 @@ $resetUrl = rtrim((string)$mailConfig['reset_url'], '/') . '?token=' . urlencode
 $mailer = new PHPMailer(true);
 try {
     $mailer->isSMTP();
+    // Give up after 15 seconds so a mail problem returns a clear message instead of timing out.
+    $mailer->Timeout = 15;
     $mailer->Host = (string)$mailConfig['host'];
     $mailer->Port = (int)$mailConfig['port'];
     $mailer->SMTPAuth = true;
