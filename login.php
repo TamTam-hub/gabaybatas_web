@@ -124,13 +124,13 @@ body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; backgr
 .tagline { margin-top: 20px; text-align: center; max-width: 380px; }
 .tagline h2 { font-family: 'Source Serif 4', serif; font-size: 19px; font-weight: 600; }
 .tagline p { margin-top: 5px; font-size: 13px; color: rgba(255,255,255,.72); line-height: 1.55; }
-.brand-foot { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: rgba(255,255,255,.6); }
+.brand-foot { position: relative; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 8px; text-align: center; font-size: 11.5px; color: rgba(255,255,255,.6); }
 .brand-foot i { color: var(--gold); font-size: 15px; }
 
 /* ── Right: sign in ── */
 .panel { display: flex; flex-direction: column; justify-content: center; padding: 44px 48px 30px; }
 .app-mark { display: inline-flex; align-items: center; gap: 9px; margin-bottom: 26px; }
-.app-mark i { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: linear-gradient(135deg, #2f6fd8, #1a4ca3); color: #fff; font-size: 18px; }
+.app-mark i { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--navy-700); color: #fff; font-size: 18px; }
 .app-mark b { font-family: 'Source Serif 4', serif; font-size: 18px; color: var(--navy-800); }
 .app-mark small { display: block; font-size: 11px; color: var(--muted); letter-spacing: .3px; }
 .panel h1 { font-family: 'Source Serif 4', serif; font-size: 30px; font-weight: 700; color: var(--ink); line-height: 1.15; }
