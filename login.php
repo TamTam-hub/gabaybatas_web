@@ -3,6 +3,7 @@ session_start();
 require_once __DIR__ . '/config/database.php';
 require_once __DIR__ . '/config/barangays.php';
 require_once __DIR__ . '/includes/brand_mark.php';
+require_once __DIR__ . '/includes/password_upgrade.php';
 $error = '';
 if (isset($_SESSION['role'])) {
     if ($_SESSION['role'] === 'admin')    { header('Location: admin/dashboard.php'); exit(); }
@@ -25,6 +26,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $storedPassword = $user['password'] ?? '';
                 $isValidPassword = password_verify($password, $storedPassword) || $password === $storedPassword;
                 if ($isValidPassword) {
+                    gabaybatas_upgrade_password($conn, (int)($user['id'] ?? 0), $password, $storedPassword);
                     $rawRole = strtolower(trim((string)($user['role'] ?? '')));
                     $role = '';
                     if ($rawRole === 'admin' || $rawRole === 'administrator') $role = 'admin';

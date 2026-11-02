@@ -36,6 +36,11 @@
         <a href="reports.php" <?= ($page === 'reports.php') ? 'class="active"' : '' ?>>
             <i class="uil uil-file-alt"></i> Reports
         </a>
+
+        <div class="nav-label">Account</div>
+        <a href="change_password.php" <?= ($page === 'change_password.php') ? 'class="active"' : '' ?>>
+            <i class="uil uil-lock-alt"></i> Change Password
+        </a>
     </nav>
 
     <div class="sidebar-footer">

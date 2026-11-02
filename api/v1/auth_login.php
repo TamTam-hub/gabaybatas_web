@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/_bootstrap.php';
+require_once __DIR__ . '/../../includes/password_upgrade.php';
 
 api_require_method('POST');
 api_ensure_mobile_tables($conn);
@@ -46,6 +47,7 @@ $storedPassword = (string)($row['password_hash'] ?? '');
 if (!password_verify($password, $storedPassword) && $password !== $storedPassword) {
     api_error('Invalid email or password.', 401);
 }
+gabaybatas_upgrade_password($conn, (int)$userId, $password, $storedPassword, $passwordColumn);
 
 if ($statusColumn !== null) {
     $status = strtolower(trim((string)($user['status'] ?? '')));
