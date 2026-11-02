@@ -11,3 +11,6 @@
 # Reference files with real names / copyrighted handbooks (kept locally)
 /*WITH NAME*.docx
 /*.pdf
+
+# Live-server database login
+/config/database.local.php

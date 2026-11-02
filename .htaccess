@@ -1,0 +1,30 @@
+# GabayBatas web server rules (Apache / Hostinger LiteSpeed)
+
+# No folder listings
+Options -Indexes
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Use HTTPS on the live site (local and LAN addresses stay on http for development)
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+    RewriteCond %{HTTP_HOST} !^(localhost|127\.0\.0\.1|10\.|192\.168\.)
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Private folders are never served directly. Residents' files and KP forms
+    # are downloaded only through the login-checked pages (api/v1/case_evidence.php,
+    # barangay/kp_download.php, ...).
+    RewriteRule ^(storage|db|tools|config|includes|vendor)(/|$) - [F,L]
+</IfModule>
+
+# Project files that are not part of the site
+<FilesMatch "^(composer\.(json|lock|phar)|composer-setup\.php|BACKEND_CONTRACT\.md|.*\.(sql|md|py|log|bak|docx|pdf))$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

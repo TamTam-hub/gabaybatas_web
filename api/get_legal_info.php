@@ -18,11 +18,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     exit;
 }
 
-// Update these values for your XAMPP/MySQL setup.
-$dbHost = '127.0.0.1';
-$dbName = 'gabaybatas_db';
-$dbUser = 'root';
-$dbPass = '';
+// Same database settings as the rest of the site (the live server sets them in config/database.local.php).
+require_once __DIR__ . '/../config/database.php';
+$dbHost = $host;
+$dbName = $database;
+$dbUser = $user;
+$dbPass = $password;
 
 try {
     $pdo = new PDO(
