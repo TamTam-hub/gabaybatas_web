@@ -166,17 +166,6 @@ body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; backgr
 
 .note { display: flex; gap: 9px; margin-top: 18px; padding: 11px 13px; border-radius: 10px; background: #f8fafc; border: 1px solid #e2e8f0; font-size: 12.5px; color: #475569; line-height: 1.5; }
 .note i { color: var(--navy-600); font-size: 16px; margin-top: 1px; }
-.divider { display: flex; align-items: center; gap: 12px; margin: 20px 0 14px; font-size: 11.5px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
-.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
-.track-link {
-    display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 12px; text-decoration: none; color: var(--ink);
-    transition: border-color .15s, background .15s;
-}
-.track-link:hover { border-color: #93c5fd; background: #f8fbff; }
-.track-link .ti { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #fff7ed; color: var(--accent); font-size: 18px; }
-.track-link strong { display: block; font-size: 13.5px; }
-.track-link small { display: block; font-size: 12px; color: var(--muted); }
-.track-link .go { margin-left: auto; color: #94a3b8; font-size: 20px; }
 
 .page-foot { position: relative; z-index: 1; margin-top: 18px; font-size: 12px; color: #7b8aa3; text-align: center; }
 
@@ -254,12 +243,6 @@ body::after { width: 560px; height: 560px; bottom: -240px; right: -140px; backgr
 
         <div class="note"><i class="uil uil-info-circle"></i><span>For barangay officials and system administrators only. Residents use the GabayBatas mobile app.</span></div>
 
-        <div class="divider">Residents</div>
-        <a href="track.php" class="track-link">
-            <span class="ti"><i class="uil uil-search-alt"></i></span>
-            <span><strong>Track your case status</strong><small>Enter your case number to see its progress</small></span>
-            <i class="uil uil-angle-right go"></i>
-        </a>
     </section>
 </main>
 

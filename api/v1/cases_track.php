@@ -6,6 +6,12 @@ require_once __DIR__ . '/_bootstrap.php';
 
 api_require_method('GET');
 
+// A resident may only look up their own case.
+$user = api_current_user($conn);
+if (!$user) {
+    api_error('Unauthorized.', 401);
+}
+
 $caseIdInput = trim((string)($_GET['case_id'] ?? $_GET['tracking_code'] ?? ''));
 if ($caseIdInput === '') {
     api_error('Please provide case_id.', 422);
@@ -33,6 +39,7 @@ $select = [
     api_has_column($caseColumns, 'status') ? 'status' : "'' AS status",
     api_has_column($caseColumns, 'assigned_to') ? 'assigned_to' : "'' AS assigned_to",
     api_has_column($caseColumns, 'kp_status') ? 'kp_status' : "'' AS kp_status",
+    api_has_column($caseColumns, 'user_id') ? 'user_id' : 'NULL AS user_id',
     $dateColumn ? ($dateColumn . ' AS created_at') : "NULL AS created_at",
 ];
 
@@ -57,9 +64,11 @@ $res = $stmt->get_result();
 $row = $res ? $res->fetch_assoc() : null;
 $stmt->close();
 
-if (!$row) {
+// Someone else's case answers the same as a missing one, so case numbers cannot be probed.
+if (!$row || (string)($row['user_id'] ?? '') === '' || (string)$row['user_id'] !== (string)($user['user_id'] ?? '')) {
     api_error('Case not found.', 404);
 }
+unset($row['user_id']);
 
 // ── Safe KP details for resident tracking ──
 $rawKpStatus = trim((string)($row['kp_status'] ?? ''));
