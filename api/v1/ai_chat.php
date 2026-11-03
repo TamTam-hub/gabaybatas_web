@@ -121,6 +121,10 @@ if (!is_array($response)) {
 if ($httpStatus < 200 || $httpStatus >= 300) {
     $providerMessage = trim((string)($response['error']['message'] ?? ''));
     error_log('GabayBatas AI: Gemini HTTP ' . $httpStatus . ': ' . $providerMessage);
+    // The free tier allows a fixed number of replies per day.
+    if ($httpStatus === 429 && stripos($providerMessage, 'per day') !== false) {
+        api_error("The AI assistant has reached today's limit. Please try again tomorrow.", 429);
+    }
     api_error(in_array($httpStatus, [429, 503], true)
         ? 'The AI assistant is busy right now. Please try again in a moment.'
         : 'The AI assistant could not answer right now. Please try again.', 502);
