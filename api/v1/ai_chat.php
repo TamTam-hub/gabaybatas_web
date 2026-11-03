@@ -78,7 +78,7 @@ $requestBody = [
 ];
 
 @set_time_limit(120);
-$callGemini = static function () use ($model, $apiKey, $requestBody): array {
+$callGemini = static function (string $model) use ($apiKey, $requestBody): array {
     $ch = curl_init(
         'https://generativelanguage.googleapis.com/v1beta/models/'
         . rawurlencode($model)
@@ -102,11 +102,31 @@ $callGemini = static function () use ($model, $apiKey, $requestBody): array {
     return [$raw, $error, $status];
 };
 
-// Gemini sometimes answers "busy" (429/503) for a moment; try once more before giving up.
-[$rawResponse, $curlError, $httpStatus] = $callGemini();
-if ($curlError === '' && in_array($httpStatus, [429, 500, 503], true)) {
-    sleep(2);
-    [$rawResponse, $curlError, $httpStatus] = $callGemini();
+// The free tier gives each model its own daily allowance, so when the main model is out
+// of replies or overloaded, the fallback model answers instead.
+$fallbackModel = trim((string)($config['fallback_model'] ?? 'gemini-3.8-flash'));
+$models = array_values(array_unique(array_filter([$model, $fallbackModel])));
+$allDailyLimited = true;
+foreach ($models as $tryModel) {
+    // Gemini sometimes answers "busy" (429/503) for a moment; try once more before moving on.
+    [$rawResponse, $curlError, $httpStatus] = $callGemini($tryModel);
+    $isDailyLimit = $httpStatus === 429 && stripos((string)$rawResponse, 'per day') !== false;
+    if ($curlError === '' && in_array($httpStatus, [429, 500, 503], true) && !$isDailyLimit) {
+        sleep(2);
+        [$rawResponse, $curlError, $httpStatus] = $callGemini($tryModel);
+        $isDailyLimit = $httpStatus === 429 && stripos((string)$rawResponse, 'per day') !== false;
+    }
+    if ($rawResponse === false || $curlError !== '') {
+        error_log('GabayBatas AI: Gemini ' . $tryModel . ' connection error: ' . $curlError);
+        $allDailyLimited = false;
+        continue;
+    }
+    if ($httpStatus >= 200 && $httpStatus < 300) {
+        $model = $tryModel;
+        break;
+    }
+    $allDailyLimited = $allDailyLimited && $isDailyLimit;
+    error_log('GabayBatas AI: Gemini ' . $tryModel . ' HTTP ' . $httpStatus);
 }
 
 if ($rawResponse === false || $curlError !== '') {
@@ -121,8 +141,8 @@ if (!is_array($response)) {
 if ($httpStatus < 200 || $httpStatus >= 300) {
     $providerMessage = trim((string)($response['error']['message'] ?? ''));
     error_log('GabayBatas AI: Gemini HTTP ' . $httpStatus . ': ' . $providerMessage);
-    // The free tier allows a fixed number of replies per day.
-    if ($httpStatus === 429 && stripos($providerMessage, 'per day') !== false) {
+    // The free tier allows a fixed number of replies per day for each model.
+    if ($allDailyLimited) {
         api_error("The AI assistant has reached today's limit. Please try again tomorrow.", 429);
     }
     api_error(in_array($httpStatus, [429, 503], true)
