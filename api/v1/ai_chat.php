@@ -134,6 +134,10 @@ foreach ((array)($response['candidates'][0]['content']['parts'] ?? []) as $part)
     }
 }
 $reply = trim($reply);
+// Apps before 1.0.2 cannot show the Submit a Case button, so they get the reply without its tag.
+if (empty($payload['submit_button'])) {
+    $reply = trim((string)preg_replace('/\s*\[SUBMIT_CASE:?[^\]]*\]/u', '', $reply));
+}
 if ($reply === '') {
     api_error('The AI assistant returned an empty response.', 502);
 }
